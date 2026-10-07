@@ -8,8 +8,16 @@ public final class Order {
     private OrderStatus status;
 
     public Order(String id) {
+        this(id, OrderStatus.CREATED);
+    }
+
+    private Order(String id, OrderStatus status) {
         this.id = Objects.requireNonNull(id, "id");
-        this.status = OrderStatus.CREATED;
+        this.status = Objects.requireNonNull(status, "status");
+    }
+
+    public static Order restore(String id, OrderStatus status) {
+        return new Order(id, status);
     }
 
     public String id() {

@@ -4,15 +4,16 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.3.0-SNAPSHOT - HTTP Order API**
+**0.4.0-SNAPSHOT - Durable Order Persistence**
 
-Spring Boot is now the application runtime and HTTP delivery mechanism. The domain and application layers remain responsible for business behavior.
+Orders are now stored in PostgreSQL. Flyway owns schema evolution, while JPA is isolated inside the infrastructure layer.
 
 ## Evolution
 
 - **0.1.0 - Core Order Lifecycle**: entity-owned state transitions demonstrated from a plain Java `main()`.
 - **0.2.0 - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
-- **0.3.0-SNAPSHOT - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
+- **0.3.0 - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
+- **0.4.0-SNAPSHOT - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
 
 ## Current flow
 
@@ -24,19 +25,41 @@ OrderController
 OrderService
   ├──→ OrderRepository
   │       ↓
-  │  InMemoryOrderRepository
+  │  PostgresOrderRepository
+  │       ↓
+  │  Spring Data JPA
+  │       ↓
+  │  PostgreSQL
   │
   └──→ Order
        ↑
   lifecycle invariant
 ```
 
-## Run
+## Run locally
 
-This version uses Spring Boot 4.1.1 and Java 21.
+Start PostgreSQL:
+
+```bash
+docker compose up -d
+```
+
+Run the application:
 
 ```bash
 gradle bootRun
 ```
 
-The next evolution replaces in-memory storage with durable PostgreSQL persistence.
+Run tests:
+
+```bash
+gradle test
+```
+
+Integration tests require Docker because they run against PostgreSQL through Testcontainers.
+
+## Next pressure
+
+The application is durable but not yet safe against two requests updating the same Order concurrently.
+
+That is the purpose of **ORD-140 - Concurrent Transition Protection**.
