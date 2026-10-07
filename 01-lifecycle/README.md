@@ -1,11 +1,33 @@
 # 01 - Lifecycle / State Machine
 
-This project starts with the smallest executable Order lifecycle model and evolves feature by feature toward a production-oriented backend service.
+This project evolves an Order lifecycle from a small executable domain sketch into a production-oriented backend service.
 
-## Current version
+## Current development version
 
-**0.1.0-SNAPSHOT - Core Order Lifecycle**
+**0.2.0-SNAPSHOT - Application Use Cases**
 
-The first feature is intentionally framework-free. Its purpose is to make the business invariant visible before Spring Boot, persistence, messaging, or deployment concerns are introduced.
+The code is still framework-free. The domain owns lifecycle invariants, while the application layer now coordinates use cases through a repository port.
 
-Related work item: **ORD-101 - Core Order Lifecycle**.
+## Evolution
+
+- **0.1.0 - Core Order Lifecycle**: entity-owned state transitions demonstrated from a plain Java `main()`.
+- **0.2.0-SNAPSHOT - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
+
+## Current flow
+
+```text
+LifecycleDemo (composition root)
+        ↓
+    OrderService
+        ↓
+  OrderRepository
+        ↓
+InMemoryOrderRepository
+
+OrderService
+        ↓
+      Order
+  (owns lifecycle rules)
+```
+
+Spring Boot, HTTP, a real database, concurrency control, messaging, and operational concerns are intentionally deferred until a requirement justifies each one.
