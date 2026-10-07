@@ -1,7 +1,8 @@
 package dev.stefanjakic.lifecycle;
 
+import dev.stefanjakic.lifecycle.application.OrderService;
 import dev.stefanjakic.lifecycle.domain.InvalidOrderTransitionException;
-import dev.stefanjakic.lifecycle.domain.Order;
+import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderRepository;
 
 public final class LifecycleDemo {
 
@@ -9,24 +10,28 @@ public final class LifecycleDemo {
     }
 
     public static void main(String[] args) {
-        happyPath();
-        protectedInvariant();
+        InMemoryOrderRepository repository = new InMemoryOrderRepository();
+        OrderService service = new OrderService(repository);
+
+        happyPath(service);
+        protectedInvariant(service);
     }
 
-    private static void happyPath() {
-        Order order = new Order("ORDER-1001");
-        order.confirm();
-        order.ship();
-        order.complete();
+    private static void happyPath(OrderService service) {
+        String orderId = service.createOrder();
 
-        System.out.println("Happy path: " + order.status());
+        service.confirmOrder(orderId);
+        service.shipOrder(orderId);
+        service.completeOrder(orderId);
+
+        System.out.println("Happy path: " + service.statusOf(orderId));
     }
 
-    private static void protectedInvariant() {
-        Order order = new Order("ORDER-1002");
+    private static void protectedInvariant(OrderService service) {
+        String orderId = service.createOrder();
 
         try {
-            order.ship();
+            service.shipOrder(orderId);
         } catch (InvalidOrderTransitionException exception) {
             System.out.println("Protected invariant: " + exception.getMessage());
         }
