@@ -4,7 +4,6 @@ import dev.stefanjakic.lifecycle.domain.Order;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
 
 import java.util.UUID;
-import java.util.function.Consumer;
 
 public final class OrderService {
 
@@ -21,29 +20,31 @@ public final class OrderService {
     }
 
     public void confirmOrder(String orderId) {
-        change(orderId, Order::confirm);
+        Order order = load(orderId);
+        order.confirm();
+        repository.save(order);
     }
 
     public void shipOrder(String orderId) {
-        change(orderId, Order::ship);
+        Order order = load(orderId);
+        order.ship();
+        repository.save(order);
     }
 
     public void completeOrder(String orderId) {
-        change(orderId, Order::complete);
+        Order order = load(orderId);
+        order.complete();
+        repository.save(order);
     }
 
     public void cancelOrder(String orderId) {
-        change(orderId, Order::cancel);
+        Order order = load(orderId);
+        order.cancel();
+        repository.save(order);
     }
 
     public OrderStatus statusOf(String orderId) {
         return load(orderId).status();
-    }
-
-    private void change(String orderId, Consumer<Order> transition) {
-        Order order = load(orderId);
-        transition.accept(order);
-        repository.save(order);
     }
 
     private Order load(String orderId) {
