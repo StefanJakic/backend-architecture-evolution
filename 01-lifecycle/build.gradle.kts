@@ -1,10 +1,11 @@
 plugins {
-    application
     java
+    id("org.springframework.boot") version "4.1.1"
+    id("io.spring.dependency-management") version "1.1.7"
 }
 
 group = "dev.stefanjakic.architecture"
-version = "0.2.0-SNAPSHOT"
+version = "0.3.0-SNAPSHOT"
 
 java {
     toolchain {
@@ -17,12 +18,10 @@ repositories {
 }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-}
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
 
-application {
-    mainClass = "dev.stefanjakic.lifecycle.LifecycleDemo"
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 }
 
 tasks.test {
