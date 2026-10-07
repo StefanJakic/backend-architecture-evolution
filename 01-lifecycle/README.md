@@ -4,30 +4,39 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.2.0-SNAPSHOT - Application Use Cases**
+**0.3.0-SNAPSHOT - HTTP Order API**
 
-The code is still framework-free. The domain owns lifecycle invariants, while the application layer now coordinates use cases through a repository port.
+Spring Boot is now the application runtime and HTTP delivery mechanism. The domain and application layers remain responsible for business behavior.
 
 ## Evolution
 
 - **0.1.0 - Core Order Lifecycle**: entity-owned state transitions demonstrated from a plain Java `main()`.
-- **0.2.0-SNAPSHOT - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
+- **0.2.0 - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
+- **0.3.0-SNAPSHOT - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
 
 ## Current flow
 
 ```text
-LifecycleDemo (composition root)
-        ↓
-    OrderService
-        ↓
-  OrderRepository
-        ↓
-InMemoryOrderRepository
-
+HTTP
+  ↓
+OrderController
+  ↓
 OrderService
-        ↓
-      Order
-  (owns lifecycle rules)
+  ├──→ OrderRepository
+  │       ↓
+  │  InMemoryOrderRepository
+  │
+  └──→ Order
+       ↑
+  lifecycle invariant
 ```
 
-Spring Boot, HTTP, a real database, concurrency control, messaging, and operational concerns are intentionally deferred until a requirement justifies each one.
+## Run
+
+This version uses Spring Boot 4.1.1 and Java 21.
+
+```bash
+gradle bootRun
+```
+
+The next evolution replaces in-memory storage with durable PostgreSQL persistence.
