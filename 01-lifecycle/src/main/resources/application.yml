@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/lifecycle}
+    username: ${DB_USERNAME:lifecycle}
+    password: ${DB_PASSWORD:lifecycle}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true

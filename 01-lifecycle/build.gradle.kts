@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "dev.stefanjakic.architecture"
-version = "0.3.0-SNAPSHOT"
+version = "0.4.0-SNAPSHOT"
 
 java {
     toolchain {
@@ -19,9 +19,14 @@ repositories {
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.flywaydb:flyway-database-postgresql")
+    runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
 }
 
 tasks.test {

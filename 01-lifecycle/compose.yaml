@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: lifecycle
+      POSTGRES_USER: lifecycle
+      POSTGRES_PASSWORD: lifecycle
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifecycle -d lifecycle"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - lifecycle-postgres:/var/lib/postgresql/data
+
+volumes:
+  lifecycle-postgres:
