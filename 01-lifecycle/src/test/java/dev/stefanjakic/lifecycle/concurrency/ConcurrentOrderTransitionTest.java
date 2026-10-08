@@ -1,6 +1,7 @@
 package dev.stefanjakic.lifecycle.concurrency;
 
 import dev.stefanjakic.lifecycle.application.ConcurrentOrderModificationException;
+import dev.stefanjakic.lifecycle.application.OrderAuditAction;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.application.OrderService;
 import dev.stefanjakic.lifecycle.domain.Order;
@@ -40,7 +41,7 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
     private CoordinatingOrderRepository repository;
 
     @Test
-    void onlyOneTransitionCommitsWhenTwoRequestsLoadedTheSameVersion() throws Exception {
+    void onlyOneTransitionAndOneAuditEntryCommitForCompetingRequests() throws Exception {
         String orderId = service.createOrder("transition-" + UUID.randomUUID());
         repository.coordinateNextTwoLoadsOf(orderId);
 
@@ -70,6 +71,18 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
             assertTrue(
                 finalStatus == OrderStatus.CONFIRMED || finalStatus == OrderStatus.CANCELLED
             );
+
+            var history = service.historyOf(orderId);
+
+            assertEquals(2, history.size());
+            assertEquals(OrderAuditAction.CREATE, history.get(0).action());
+
+            OrderAuditAction committedAction =
+                finalStatus == OrderStatus.CONFIRMED
+                    ? OrderAuditAction.CONFIRM
+                    : OrderAuditAction.CANCEL;
+
+            assertEquals(committedAction, history.get(1).action());
         } finally {
             repository.stopCoordinating();
             executor.shutdownNow();
