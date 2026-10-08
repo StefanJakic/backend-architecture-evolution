@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,8 +22,11 @@ public class OrderController {
     }
 
     @PostMapping
-    ResponseEntity<OrderResponse> createOrder() {
-        String orderId = service.createOrder();
+    ResponseEntity<OrderResponse> createOrder(
+        @RequestHeader(value = "Idempotency-Key", required = false)
+        String idempotencyKey
+    ) {
+        String orderId = service.createOrder(idempotencyKey);
 
         return ResponseEntity
             .created(URI.create("/orders/" + orderId))

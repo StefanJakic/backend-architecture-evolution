@@ -1,6 +1,8 @@
 package dev.stefanjakic.lifecycle.api;
 
 import dev.stefanjakic.lifecycle.application.ConcurrentOrderModificationException;
+import dev.stefanjakic.lifecycle.application.IdempotencyResultUnavailableException;
+import dev.stefanjakic.lifecycle.application.InvalidIdempotencyKeyException;
 import dev.stefanjakic.lifecycle.application.OrderNotFoundException;
 import dev.stefanjakic.lifecycle.domain.InvalidOrderTransitionException;
 import org.springframework.http.HttpStatus;
@@ -34,5 +36,23 @@ public class ApiExceptionHandler {
         return ResponseEntity
             .status(HttpStatus.CONFLICT)
             .body(new ApiError("ORDER_CONCURRENT_MODIFICATION", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidIdempotencyKeyException.class)
+    ResponseEntity<ApiError> handleInvalidIdempotencyKey(
+        InvalidIdempotencyKeyException exception
+    ) {
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(new ApiError("INVALID_IDEMPOTENCY_KEY", exception.getMessage()));
+    }
+
+    @ExceptionHandler(IdempotencyResultUnavailableException.class)
+    ResponseEntity<ApiError> handleIdempotencyResultUnavailable(
+        IdempotencyResultUnavailableException exception
+    ) {
+        return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(new ApiError("IDEMPOTENCY_RESULT_UNAVAILABLE", exception.getMessage()));
     }
 }
