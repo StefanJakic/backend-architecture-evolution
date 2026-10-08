@@ -4,9 +4,9 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.7.0-SNAPSHOT - Lifecycle Audit Trail**
+**0.8.0-SNAPSHOT - Domain Events**
 
-The service now stores append-only history for every committed Order lifecycle change and exposes it through a read-only history endpoint.
+Order lifecycle changes now create explicit domain events and publish them in-process only after the database transaction commits.
 
 ## Evolution
 
@@ -16,7 +16,8 @@ The service now stores append-only history for every committed Order lifecycle c
 - **0.4.0 - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
 - **0.5.0 - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
 - **0.6.0 - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
-- **0.7.0-SNAPSHOT - Lifecycle Audit Trail**: successful lifecycle changes append durable history in the same transaction as Order state.
+- **0.7.0 - Lifecycle Audit Trail**: committed lifecycle changes append durable local history.
+- **0.8.0-SNAPSHOT - Domain Events**: Order records named business facts and publishes them after commit.
 
 ## Current write flow
 
@@ -25,38 +26,42 @@ HTTP command
     ↓
 OrderService @Transactional
     ↓
-load Order
+Order transition
+    ├── changes state
+    └── records domain event
     ↓
-domain transition
+persist Order
     ↓
-persist current state
-    ↓
-append audit history
+release event
+    ├── append audit
+    └── schedule after-commit publication
     ↓
 COMMIT
+    ↓
+publish event in process
 ```
 
-A failed domain transition or optimistic-lock conflict rolls the whole transaction back, so history contains only committed lifecycle changes.
-
-## Read current state
-
-```bash
-curl http://localhost:8080/orders/{orderId}
-```
-
-## Read lifecycle history
-
-```bash
-curl http://localhost:8080/orders/{orderId}/history
-```
-
-Example history:
+Example facts:
 
 ```text
-CREATE  null      -> CREATED
-CONFIRM CREATED   -> CONFIRMED
-SHIP    CONFIRMED -> SHIPPED
+OrderCreated
+OrderConfirmed
+OrderShipped
+OrderCompleted
+OrderCancelled
 ```
+
+## Important reliability gap
+
+The event is currently published after commit but only from application memory.
+
+```text
+DB COMMIT ✅
+process crash 💥
+event publication ❌
+```
+
+This is intentional. The next evolution step exists because this failure window is real.
 
 ## Run locally with Podman
 
@@ -67,6 +72,6 @@ gradle bootRun
 
 ## Next pressure
 
-Audit gives us durable local history, but other parts of a system still have no explicit business signal that an Order was confirmed, shipped, or cancelled.
+The database state and audit history are durable, but in-process domain-event publication is not.
 
-The next feature is **ORD-170 - Domain Events**.
+The next feature is **ORD-180 - Transactional Outbox**.
