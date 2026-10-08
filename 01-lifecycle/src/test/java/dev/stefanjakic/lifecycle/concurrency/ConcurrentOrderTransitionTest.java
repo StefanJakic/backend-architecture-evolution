@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Optional;
@@ -40,8 +41,13 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
     @Autowired
     private CoordinatingOrderRepository repository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
-    void onlyOneTransitionAndOneAuditEntryCommitForCompetingRequests() throws Exception {
+    void onlyOneTransitionAuditAndOutboxEventCommitForCompetingRequests()
+        throws Exception {
+
         String orderId = service.createOrder("transition-" + UUID.randomUUID());
         repository.coordinateNextTwoLoadsOf(orderId);
 
@@ -83,6 +89,18 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
                     : OrderAuditAction.CANCEL;
 
             assertEquals(committedAction, history.get(1).action());
+
+            Integer outboxEvents = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM order_event_outbox
+                WHERE order_id = ?
+                """,
+                Integer.class,
+                orderId
+            );
+
+            assertEquals(2, outboxEvents);
         } finally {
             repository.stopCoordinating();
             executor.shutdownNow();

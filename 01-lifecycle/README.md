@@ -4,9 +4,9 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.8.0-SNAPSHOT - Domain Events**
+**0.9.0-SNAPSHOT - Transactional Outbox**
 
-Order lifecycle changes now create explicit domain events and publish them in-process only after the database transaction commits.
+Order domain events are now persisted durably in PostgreSQL in the same transaction as Order state and lifecycle audit history.
 
 ## Evolution
 
@@ -17,7 +17,8 @@ Order lifecycle changes now create explicit domain events and publish them in-pr
 - **0.5.0 - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
 - **0.6.0 - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
 - **0.7.0 - Lifecycle Audit Trail**: committed lifecycle changes append durable local history.
-- **0.8.0-SNAPSHOT - Domain Events**: Order records named business facts and publishes them after commit.
+- **0.8.0 - Domain Events**: Order records named business facts after valid lifecycle changes.
+- **0.9.0-SNAPSHOT - Transactional Outbox**: domain events commit atomically with Order state and audit history.
 
 ## Current write flow
 
@@ -34,34 +35,42 @@ persist Order
     ↓
 release event
     ├── append audit
-    └── schedule after-commit publication
+    └── insert outbox row
     ↓
 COMMIT
-    ↓
-publish event in process
 ```
 
-Example facts:
+For Order creation, idempotency completion is also part of the same transaction.
 
-```text
-OrderCreated
-OrderConfirmed
-OrderShipped
-OrderCompleted
-OrderCancelled
-```
+## Reliability improvement
 
-## Important reliability gap
-
-The event is currently published after commit but only from application memory.
+Before:
 
 ```text
 DB COMMIT ✅
 process crash 💥
-event publication ❌
+in-memory event lost ❌
 ```
 
-This is intentional. The next evolution step exists because this failure window is real.
+Now:
+
+```text
+BEGIN
+  Order state
+  audit
+  outbox event
+COMMIT
+        ↓
+process may crash
+        ↓
+event still exists in PostgreSQL ✅
+```
+
+## What is intentionally missing
+
+The outbox is durable storage, not a delivery mechanism.
+
+There is no Kafka producer or relay in this version yet.
 
 ## Run locally with Podman
 
@@ -72,6 +81,6 @@ gradle bootRun
 
 ## Next pressure
 
-The database state and audit history are durable, but in-process domain-event publication is not.
+Durable events now survive process crashes, but they still need reliable external delivery.
 
-The next feature is **ORD-180 - Transactional Outbox**.
+The next feature is **ORD-190 - Reliable Kafka Publication**.
