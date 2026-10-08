@@ -4,9 +4,7 @@ import dev.stefanjakic.lifecycle.domain.event.OrderDomainEvent;
 
 import java.util.List;
 
-public interface OrderAuditRepository {
+public interface OrderDomainEventPublisher {
 
-    void append(OrderDomainEvent event);
-
-    List<OrderAuditEntry> findByOrderId(String orderId);
+    void publishAfterCommit(List<OrderDomainEvent> events);
 }

@@ -4,6 +4,12 @@ import dev.stefanjakic.lifecycle.application.OrderAuditAction;
 import dev.stefanjakic.lifecycle.application.OrderAuditEntry;
 import dev.stefanjakic.lifecycle.application.OrderAuditRepository;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
+import dev.stefanjakic.lifecycle.domain.event.OrderCancelled;
+import dev.stefanjakic.lifecycle.domain.event.OrderCompleted;
+import dev.stefanjakic.lifecycle.domain.event.OrderConfirmed;
+import dev.stefanjakic.lifecycle.domain.event.OrderCreated;
+import dev.stefanjakic.lifecycle.domain.event.OrderDomainEvent;
+import dev.stefanjakic.lifecycle.domain.event.OrderShipped;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -19,12 +25,7 @@ public class PostgresOrderAuditRepository implements OrderAuditRepository {
     }
 
     @Override
-    public void append(
-        String orderId,
-        OrderAuditAction action,
-        OrderStatus fromStatus,
-        OrderStatus toStatus
-    ) {
+    public void append(OrderDomainEvent event) {
         jdbcTemplate.update(
             """
             INSERT INTO order_lifecycle_audit (
@@ -35,10 +36,10 @@ public class PostgresOrderAuditRepository implements OrderAuditRepository {
             )
             VALUES (?, ?, ?, ?)
             """,
-            orderId,
-            action.name(),
-            fromStatus == null ? null : fromStatus.name(),
-            toStatus.name()
+            event.orderId(),
+            actionOf(event).name(),
+            event.fromStatus() == null ? null : event.fromStatus().name(),
+            event.toStatus().name()
         );
     }
 
@@ -61,6 +62,16 @@ public class PostgresOrderAuditRepository implements OrderAuditRepository {
             ),
             orderId
         );
+    }
+
+    private OrderAuditAction actionOf(OrderDomainEvent event) {
+        return switch (event) {
+            case OrderCreated ignored -> OrderAuditAction.CREATE;
+            case OrderConfirmed ignored -> OrderAuditAction.CONFIRM;
+            case OrderShipped ignored -> OrderAuditAction.SHIP;
+            case OrderCompleted ignored -> OrderAuditAction.COMPLETE;
+            case OrderCancelled ignored -> OrderAuditAction.CANCEL;
+        };
     }
 
     private OrderStatus nullableStatus(String status) {
