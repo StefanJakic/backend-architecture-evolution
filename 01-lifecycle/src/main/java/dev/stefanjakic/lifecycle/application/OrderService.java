@@ -2,6 +2,7 @@ package dev.stefanjakic.lifecycle.application;
 
 import dev.stefanjakic.lifecycle.domain.Order;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
+import dev.stefanjakic.lifecycle.domain.event.OrderDomainEvent;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -15,15 +16,18 @@ public class OrderService {
     private final OrderRepository repository;
     private final OrderCreationIdempotencyRepository idempotencyRepository;
     private final OrderAuditRepository auditRepository;
+    private final OrderDomainEventPublisher eventPublisher;
 
     public OrderService(
         OrderRepository repository,
         OrderCreationIdempotencyRepository idempotencyRepository,
-        OrderAuditRepository auditRepository
+        OrderAuditRepository auditRepository,
+        OrderDomainEventPublisher eventPublisher
     ) {
         this.repository = repository;
         this.idempotencyRepository = idempotencyRepository;
         this.auditRepository = auditRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     public String createOrder(String idempotencyKey) {
@@ -47,12 +51,7 @@ public class OrderService {
 
         Order order = new Order(UUID.randomUUID().toString());
         repository.save(order);
-        auditRepository.append(
-            order.id(),
-            OrderAuditAction.CREATE,
-            null,
-            OrderStatus.CREATED
-        );
+        recordEvents(order);
         idempotencyRepository.complete(idempotencyKey, order.id());
 
         return order.id();
@@ -60,58 +59,34 @@ public class OrderService {
 
     public void confirmOrder(String orderId) {
         Order order = load(orderId);
-        OrderStatus previousStatus = order.status();
 
         order.confirm();
         repository.save(order);
-        auditRepository.append(
-            order.id(),
-            OrderAuditAction.CONFIRM,
-            previousStatus,
-            order.status()
-        );
+        recordEvents(order);
     }
 
     public void shipOrder(String orderId) {
         Order order = load(orderId);
-        OrderStatus previousStatus = order.status();
 
         order.ship();
         repository.save(order);
-        auditRepository.append(
-            order.id(),
-            OrderAuditAction.SHIP,
-            previousStatus,
-            order.status()
-        );
+        recordEvents(order);
     }
 
     public void completeOrder(String orderId) {
         Order order = load(orderId);
-        OrderStatus previousStatus = order.status();
 
         order.complete();
         repository.save(order);
-        auditRepository.append(
-            order.id(),
-            OrderAuditAction.COMPLETE,
-            previousStatus,
-            order.status()
-        );
+        recordEvents(order);
     }
 
     public void cancelOrder(String orderId) {
         Order order = load(orderId);
-        OrderStatus previousStatus = order.status();
 
         order.cancel();
         repository.save(order);
-        auditRepository.append(
-            order.id(),
-            OrderAuditAction.CANCEL,
-            previousStatus,
-            order.status()
-        );
+        recordEvents(order);
     }
 
     @Transactional(readOnly = true)
@@ -123,6 +98,13 @@ public class OrderService {
     public List<OrderAuditEntry> historyOf(String orderId) {
         load(orderId);
         return auditRepository.findByOrderId(orderId);
+    }
+
+    private void recordEvents(Order order) {
+        List<OrderDomainEvent> events = order.releaseEvents();
+
+        events.forEach(auditRepository::append);
+        eventPublisher.publishAfterCommit(events);
     }
 
     private Order load(String orderId) {
