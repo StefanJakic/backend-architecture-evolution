@@ -4,9 +4,9 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.6.0-SNAPSHOT - Idempotent Order Creation**
+**0.7.0-SNAPSHOT - Lifecycle Audit Trail**
 
-Order creation is now safe to retry with an `Idempotency-Key`. Sequential and concurrent duplicate requests return the same Order instead of creating another one.
+The service now stores append-only history for every committed Order lifecycle change and exposes it through a read-only history endpoint.
 
 ## Evolution
 
@@ -15,36 +15,48 @@ Order creation is now safe to retry with an `Idempotency-Key`. Sequential and co
 - **0.3.0 - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
 - **0.4.0 - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
 - **0.5.0 - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
-- **0.6.0-SNAPSHOT - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
+- **0.6.0 - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
+- **0.7.0-SNAPSHOT - Lifecycle Audit Trail**: successful lifecycle changes append durable history in the same transaction as Order state.
 
-## Create an Order
-
-```bash
-curl -X POST http://localhost:8080/orders \
-  -H "Idempotency-Key: create-order-123"
-```
-
-Retry the exact same logical request with the same key and the API returns the same Order id.
-
-## Current create flow
+## Current write flow
 
 ```text
-HTTP Idempotency-Key
-        ↓
-    OrderService @Transactional
-        ↓
-find / claim idempotency key
-        ↓
-      create Order
-        ↓
-   persist Order
-        ↓
-complete idempotency record
-        ↓
-       COMMIT
+HTTP command
+    ↓
+OrderService @Transactional
+    ↓
+load Order
+    ↓
+domain transition
+    ↓
+persist current state
+    ↓
+append audit history
+    ↓
+COMMIT
 ```
 
-PostgreSQL owns duplicate-key arbitration, so the behavior also works when requests hit different application instances.
+A failed domain transition or optimistic-lock conflict rolls the whole transaction back, so history contains only committed lifecycle changes.
+
+## Read current state
+
+```bash
+curl http://localhost:8080/orders/{orderId}
+```
+
+## Read lifecycle history
+
+```bash
+curl http://localhost:8080/orders/{orderId}/history
+```
+
+Example history:
+
+```text
+CREATE  null      -> CREATED
+CONFIRM CREATED   -> CONFIRMED
+SHIP    CONFIRMED -> SHIPPED
+```
 
 ## Run locally with Podman
 
@@ -55,6 +67,6 @@ gradle bootRun
 
 ## Next pressure
 
-We can now explain **what the current state is** and safely create/retry an Order, but we still do not retain a business history of how the Order reached that state.
+Audit gives us durable local history, but other parts of a system still have no explicit business signal that an Order was confirmed, shipped, or cancelled.
 
-The next feature is **ORD-160 - Lifecycle Audit Trail**.
+The next feature is **ORD-170 - Domain Events**.

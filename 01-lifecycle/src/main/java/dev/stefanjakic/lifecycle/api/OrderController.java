@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.List;
 
 @RestController
 @RequestMapping("/orders")
@@ -36,6 +37,14 @@ public class OrderController {
     @GetMapping("/{orderId}")
     OrderResponse getOrder(@PathVariable String orderId) {
         return response(orderId);
+    }
+
+    @GetMapping("/{orderId}/history")
+    List<OrderAuditResponse> getOrderHistory(@PathVariable String orderId) {
+        return service.historyOf(orderId)
+            .stream()
+            .map(OrderAuditResponse::of)
+            .toList();
     }
 
     @PostMapping("/{orderId}/confirm")
