@@ -1,5 +1,6 @@
 package dev.stefanjakic.lifecycle.api;
 
+import dev.stefanjakic.lifecycle.application.ConcurrentOrderModificationException;
 import dev.stefanjakic.lifecycle.application.OrderNotFoundException;
 import dev.stefanjakic.lifecycle.domain.InvalidOrderTransitionException;
 import org.springframework.http.HttpStatus;
@@ -24,5 +25,14 @@ public class ApiExceptionHandler {
         return ResponseEntity
             .status(HttpStatus.CONFLICT)
             .body(new ApiError("INVALID_ORDER_TRANSITION", exception.getMessage()));
+    }
+
+    @ExceptionHandler(ConcurrentOrderModificationException.class)
+    ResponseEntity<ApiError> handleConcurrentModification(
+        ConcurrentOrderModificationException exception
+    ) {
+        return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(new ApiError("ORDER_CONCURRENT_MODIFICATION", exception.getMessage()));
     }
 }

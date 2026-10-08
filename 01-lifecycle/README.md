@@ -4,16 +4,17 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.4.0-SNAPSHOT - Durable Order Persistence**
+**0.5.0-SNAPSHOT - Concurrent Transition Protection**
 
-Orders are now stored in PostgreSQL. Flyway owns schema evolution, while JPA is isolated inside the infrastructure layer.
+Orders are durable in PostgreSQL and stale concurrent lifecycle updates are now rejected through optimistic locking.
 
 ## Evolution
 
 - **0.1.0 - Core Order Lifecycle**: entity-owned state transitions demonstrated from a plain Java `main()`.
 - **0.2.0 - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
 - **0.3.0 - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
-- **0.4.0-SNAPSHOT - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
+- **0.4.0 - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
+- **0.5.0-SNAPSHOT - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
 
 ## Current flow
 
@@ -22,12 +23,12 @@ HTTP
   ↓
 OrderController
   ↓
-OrderService
+OrderService  @Transactional
   ├──→ OrderRepository
   │       ↓
   │  PostgresOrderRepository
   │       ↓
-  │  Spring Data JPA
+  │  OrderJpaEntity @Version
   │       ↓
   │  PostgreSQL
   │
@@ -36,12 +37,23 @@ OrderService
   lifecycle invariant
 ```
 
-## Run locally
+## Concurrent update behavior
+
+Two requests may both read the same Order version, but they cannot both commit a write based on it.
+
+```text
+A loads v0 -> CONFIRM -> commit v1
+B loads v0 -> CANCEL  -> optimistic lock conflict -> HTTP 409
+```
+
+The winner is determined by which database update commits first. The loser is not silently overwritten.
+
+## Run locally with Podman
 
 Start PostgreSQL:
 
 ```bash
-docker compose up -d
+podman compose up -d
 ```
 
 Run the application:
@@ -50,16 +62,10 @@ Run the application:
 gradle bootRun
 ```
 
-Run tests:
-
-```bash
-gradle test
-```
-
-Integration tests require Docker because they run against PostgreSQL through Testcontainers.
+Integration tests use Testcontainers and require a Docker-compatible container socket. Podman users may need to expose/configure the Podman socket for Testcontainers.
 
 ## Next pressure
 
-The application is durable but not yet safe against two requests updating the same Order concurrently.
+Concurrency control identifies stale competing writes. It does not make network retries safe.
 
-That is the purpose of **ORD-140 - Concurrent Transition Protection**.
+The next feature is **ORD-150 - Idempotent Order Commands**.

@@ -1,7 +1,9 @@
 package dev.stefanjakic.lifecycle.infrastructure.persistence;
 
+import dev.stefanjakic.lifecycle.application.ConcurrentOrderModificationException;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.domain.Order;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -24,8 +26,12 @@ public class PostgresOrderRepository implements OrderRepository {
             })
             .orElseGet(() -> new OrderJpaEntity(order.id(), order.status()));
 
-        repository.save(entity);
-        return order;
+        try {
+            repository.saveAndFlush(entity);
+            return order;
+        } catch (OptimisticLockingFailureException exception) {
+            throw new ConcurrentOrderModificationException(order.id(), exception);
+        }
     }
 
     @Override

@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "orders")
@@ -19,6 +20,10 @@ public class OrderJpaEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private OrderStatus status;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     protected OrderJpaEntity() {
     }
