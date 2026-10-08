@@ -9,3 +9,23 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+
+order:
+  events:
+    topic: ${ORDER_EVENTS_TOPIC:order.lifecycle.v1}
+
+outbox:
+  relay:
+    enabled: ${OUTBOX_RELAY_ENABLED:true}
+    fixed-delay-ms: ${OUTBOX_RELAY_FIXED_DELAY_MS:500}
+    batch-size: ${OUTBOX_RELAY_BATCH_SIZE:100}
+    lease-timeout-ms: ${OUTBOX_RELAY_LEASE_TIMEOUT_MS:30000}
+    publish-timeout-seconds: ${OUTBOX_RELAY_PUBLISH_TIMEOUT_SECONDS:10}
