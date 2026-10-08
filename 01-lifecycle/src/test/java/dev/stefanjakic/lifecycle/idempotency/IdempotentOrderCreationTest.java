@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Optional;
@@ -35,6 +36,9 @@ class IdempotentOrderCreationTest extends PostgresIntegrationTest {
 
     @Autowired
     private CoordinatingIdempotencyRepository idempotencyRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void concurrentRequestsWithTheSameKeyReturnOneOrderAndOneCreateAudit() throws Exception {
@@ -63,6 +67,18 @@ class IdempotentOrderCreationTest extends PostgresIntegrationTest {
 
             assertEquals(1, history.size());
             assertEquals(OrderAuditAction.CREATE, history.get(0).action());
+
+            Integer outboxEvents = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM order_event_outbox
+                WHERE order_id = ?
+                """,
+                Integer.class,
+                firstOrderId
+            );
+
+            assertEquals(1, outboxEvents);
         } finally {
             idempotencyRepository.stopCoordinating();
             executor.shutdownNow();
