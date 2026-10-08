@@ -2,11 +2,17 @@ package dev.stefanjakic.lifecycle.infrastructure.configuration;
 
 import dev.stefanjakic.lifecycle.application.OrderAuditRepository;
 import dev.stefanjakic.lifecycle.application.OrderCreationIdempotencyRepository;
+import dev.stefanjakic.lifecycle.application.OrderEventTransport;
+import dev.stefanjakic.lifecycle.application.OrderOutboxRelay;
+import dev.stefanjakic.lifecycle.application.OrderOutboxRelayRepository;
 import dev.stefanjakic.lifecycle.application.OrderOutboxRepository;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.application.OrderService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Duration;
 
 @Configuration
 public class ApplicationConfiguration {
@@ -23,6 +29,21 @@ public class ApplicationConfiguration {
             idempotencyRepository,
             auditRepository,
             outboxRepository
+        );
+    }
+
+    @Bean
+    OrderOutboxRelay orderOutboxRelay(
+        OrderOutboxRelayRepository repository,
+        OrderEventTransport transport,
+        @Value("${outbox.relay.batch-size:100}") int batchSize,
+        @Value("${outbox.relay.lease-timeout-ms:30000}") long leaseTimeoutMs
+    ) {
+        return new OrderOutboxRelay(
+            repository,
+            transport,
+            batchSize,
+            Duration.ofMillis(leaseTimeoutMs)
         );
     }
 }

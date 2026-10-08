@@ -4,9 +4,11 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.9.0-SNAPSHOT - Transactional Outbox**
+**0.10.0-SNAPSHOT - Reliable Kafka Publication**
 
-Order domain events are now persisted durably in PostgreSQL in the same transaction as Order state and lifecycle audit history.
+Durable outbox events are now claimed by a lease-based relay, published to Kafka, and marked as delivered after broker acknowledgement.
+
+Delivery semantics are explicitly **at-least-once**.
 
 ## Evolution
 
@@ -18,69 +20,72 @@ Order domain events are now persisted durably in PostgreSQL in the same transact
 - **0.6.0 - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
 - **0.7.0 - Lifecycle Audit Trail**: committed lifecycle changes append durable local history.
 - **0.8.0 - Domain Events**: Order records named business facts after valid lifecycle changes.
-- **0.9.0-SNAPSHOT - Transactional Outbox**: domain events commit atomically with Order state and audit history.
+- **0.9.0 - Transactional Outbox**: domain events commit atomically with Order state and audit history.
+- **0.10.0-SNAPSHOT - Reliable Kafka Publication**: a lease-based relay publishes durable outbox events with at-least-once semantics.
 
-## Current write flow
+## End-to-end event flow
 
-```text
+~~~text
 HTTP command
     ↓
 OrderService @Transactional
     ↓
 Order transition
-    ├── changes state
-    └── records domain event
     ↓
-persist Order
-    ↓
-release event
-    ├── append audit
-    └── insert outbox row
+Order + audit + outbox
     ↓
 COMMIT
-```
 
-For Order creation, idempotency completion is also part of the same transaction.
+outbox PENDING
+    ↓
+relay claims batch
+    ↓
+IN_PROGRESS
+    ↓
+Kafka publish
+    ↓
+broker ack
+    ↓
+PUBLISHED
+~~~
 
-## Reliability improvement
+Kafka records use `orderId` as their key and include `eventId` and `eventType` headers.
 
-Before:
+## Failure semantics
 
-```text
-DB COMMIT ✅
-process crash 💥
-in-memory event lost ❌
-```
+If Kafka publication fails:
 
-Now:
+~~~text
+IN_PROGRESS → PENDING → retry
+~~~
 
-```text
-BEGIN
-  Order state
-  audit
-  outbox event
-COMMIT
-        ↓
-process may crash
-        ↓
-event still exists in PostgreSQL ✅
-```
+If a relay crashes after claiming work:
 
-## What is intentionally missing
+~~~text
+IN_PROGRESS → lease expires → claimable again
+~~~
 
-The outbox is durable storage, not a delivery mechanism.
+If Kafka acknowledges but PostgreSQL cannot record PUBLISHED:
 
-There is no Kafka producer or relay in this version yet.
+~~~text
+Kafka has event
+outbox retries later
+→ duplicate delivery is possible
+~~~
+
+Consumers must therefore be idempotent by `eventId`.
 
 ## Run locally with Podman
 
-```bash
+~~~bash
 podman compose up -d
 gradle bootRun
-```
+~~~
+
+The local compose environment starts PostgreSQL and Apache Kafka.
 
 ## Next pressure
 
-Durable events now survive process crashes, but they still need reliable external delivery.
+The service is now durable, concurrency-safe, retry-safe, auditable, and capable of reliable at-least-once event delivery.
 
-The next feature is **ORD-190 - Reliable Kafka Publication**.
+The next feature is **ORD-200 - Operability / Production Baseline**.
