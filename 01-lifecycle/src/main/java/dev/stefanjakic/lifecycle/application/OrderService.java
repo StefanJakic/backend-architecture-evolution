@@ -16,18 +16,18 @@ public class OrderService {
     private final OrderRepository repository;
     private final OrderCreationIdempotencyRepository idempotencyRepository;
     private final OrderAuditRepository auditRepository;
-    private final OrderDomainEventPublisher eventPublisher;
+    private final OrderOutboxRepository outboxRepository;
 
     public OrderService(
         OrderRepository repository,
         OrderCreationIdempotencyRepository idempotencyRepository,
         OrderAuditRepository auditRepository,
-        OrderDomainEventPublisher eventPublisher
+        OrderOutboxRepository outboxRepository
     ) {
         this.repository = repository;
         this.idempotencyRepository = idempotencyRepository;
         this.auditRepository = auditRepository;
-        this.eventPublisher = eventPublisher;
+        this.outboxRepository = outboxRepository;
     }
 
     public String createOrder(String idempotencyKey) {
@@ -51,7 +51,7 @@ public class OrderService {
 
         Order order = new Order(UUID.randomUUID().toString());
         repository.save(order);
-        recordEvents(order);
+        persistEvents(order);
         idempotencyRepository.complete(idempotencyKey, order.id());
 
         return order.id();
@@ -62,7 +62,7 @@ public class OrderService {
 
         order.confirm();
         repository.save(order);
-        recordEvents(order);
+        persistEvents(order);
     }
 
     public void shipOrder(String orderId) {
@@ -70,7 +70,7 @@ public class OrderService {
 
         order.ship();
         repository.save(order);
-        recordEvents(order);
+        persistEvents(order);
     }
 
     public void completeOrder(String orderId) {
@@ -78,7 +78,7 @@ public class OrderService {
 
         order.complete();
         repository.save(order);
-        recordEvents(order);
+        persistEvents(order);
     }
 
     public void cancelOrder(String orderId) {
@@ -86,7 +86,7 @@ public class OrderService {
 
         order.cancel();
         repository.save(order);
-        recordEvents(order);
+        persistEvents(order);
     }
 
     @Transactional(readOnly = true)
@@ -100,11 +100,13 @@ public class OrderService {
         return auditRepository.findByOrderId(orderId);
     }
 
-    private void recordEvents(Order order) {
+    private void persistEvents(Order order) {
         List<OrderDomainEvent> events = order.releaseEvents();
 
-        events.forEach(auditRepository::append);
-        eventPublisher.publishAfterCommit(events);
+        for (OrderDomainEvent event : events) {
+            auditRepository.append(event);
+            outboxRepository.append(event);
+        }
     }
 
     private Order load(String orderId) {

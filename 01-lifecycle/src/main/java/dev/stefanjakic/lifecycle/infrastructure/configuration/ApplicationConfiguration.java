@@ -2,7 +2,7 @@ package dev.stefanjakic.lifecycle.infrastructure.configuration;
 
 import dev.stefanjakic.lifecycle.application.OrderAuditRepository;
 import dev.stefanjakic.lifecycle.application.OrderCreationIdempotencyRepository;
-import dev.stefanjakic.lifecycle.application.OrderDomainEventPublisher;
+import dev.stefanjakic.lifecycle.application.OrderOutboxRepository;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.application.OrderService;
 import org.springframework.context.annotation.Bean;
@@ -16,13 +16,13 @@ public class ApplicationConfiguration {
         OrderRepository repository,
         OrderCreationIdempotencyRepository idempotencyRepository,
         OrderAuditRepository auditRepository,
-        OrderDomainEventPublisher eventPublisher
+        OrderOutboxRepository outboxRepository
     ) {
         return new OrderService(
             repository,
             idempotencyRepository,
             auditRepository,
-            eventPublisher
+            outboxRepository
         );
     }
 }
