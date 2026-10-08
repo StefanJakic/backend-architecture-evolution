@@ -2,10 +2,12 @@ package dev.stefanjakic.lifecycle.application;
 
 import dev.stefanjakic.lifecycle.domain.Order;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
-public final class OrderService {
+@Transactional
+public class OrderService {
 
     private final OrderRepository repository;
 
@@ -43,6 +45,7 @@ public final class OrderService {
         repository.save(order);
     }
 
+    @Transactional(readOnly = true)
     public OrderStatus statusOf(String orderId) {
         return load(orderId).status();
     }
