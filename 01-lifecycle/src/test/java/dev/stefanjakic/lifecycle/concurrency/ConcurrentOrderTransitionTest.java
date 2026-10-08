@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Primary;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,7 +41,7 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
 
     @Test
     void onlyOneTransitionCommitsWhenTwoRequestsLoadedTheSameVersion() throws Exception {
-        String orderId = service.createOrder();
+        String orderId = service.createOrder("transition-" + UUID.randomUUID());
         repository.coordinateNextTwoLoadsOf(orderId);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -157,11 +158,16 @@ class ConcurrentOrderTransitionTest extends PostgresIntegrationTest {
         private void awaitRelease() {
             try {
                 if (!release.await(5, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("Timed out waiting to release concurrent requests");
+                    throw new IllegalStateException(
+                        "Timed out waiting to release concurrent requests"
+                    );
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while coordinating concurrent requests", exception);
+                throw new IllegalStateException(
+                    "Interrupted while coordinating concurrent requests",
+                    exception
+                );
             }
         }
     }

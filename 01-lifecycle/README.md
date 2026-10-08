@@ -4,9 +4,9 @@ This project evolves an Order lifecycle from a small executable domain sketch in
 
 ## Current development version
 
-**0.5.0-SNAPSHOT - Concurrent Transition Protection**
+**0.6.0-SNAPSHOT - Idempotent Order Creation**
 
-Orders are durable in PostgreSQL and stale concurrent lifecycle updates are now rejected through optimistic locking.
+Order creation is now safe to retry with an `Idempotency-Key`. Sequential and concurrent duplicate requests return the same Order instead of creating another one.
 
 ## Evolution
 
@@ -14,58 +14,47 @@ Orders are durable in PostgreSQL and stale concurrent lifecycle updates are now 
 - **0.2.0 - Application Use Cases**: `OrderService`, repository port, and in-memory adapter introduce an application boundary.
 - **0.3.0 - HTTP Order API**: Spring Boot and REST expose the existing use cases without moving lifecycle logic into controllers.
 - **0.4.0 - Durable Order Persistence**: PostgreSQL, Flyway, JPA adapter, and Testcontainers replace runtime in-memory storage.
-- **0.5.0-SNAPSHOT - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
+- **0.5.0 - Concurrent Transition Protection**: transactions and optimistic locking reject stale writes.
+- **0.6.0-SNAPSHOT - Idempotent Order Creation**: persisted retry keys prevent duplicate Orders.
 
-## Current flow
+## Create an Order
 
-```text
-HTTP
-  ↓
-OrderController
-  ↓
-OrderService  @Transactional
-  ├──→ OrderRepository
-  │       ↓
-  │  PostgresOrderRepository
-  │       ↓
-  │  OrderJpaEntity @Version
-  │       ↓
-  │  PostgreSQL
-  │
-  └──→ Order
-       ↑
-  lifecycle invariant
+```bash
+curl -X POST http://localhost:8080/orders \
+  -H "Idempotency-Key: create-order-123"
 ```
 
-## Concurrent update behavior
+Retry the exact same logical request with the same key and the API returns the same Order id.
 
-Two requests may both read the same Order version, but they cannot both commit a write based on it.
+## Current create flow
 
 ```text
-A loads v0 -> CONFIRM -> commit v1
-B loads v0 -> CANCEL  -> optimistic lock conflict -> HTTP 409
+HTTP Idempotency-Key
+        ↓
+    OrderService @Transactional
+        ↓
+find / claim idempotency key
+        ↓
+      create Order
+        ↓
+   persist Order
+        ↓
+complete idempotency record
+        ↓
+       COMMIT
 ```
 
-The winner is determined by which database update commits first. The loser is not silently overwritten.
+PostgreSQL owns duplicate-key arbitration, so the behavior also works when requests hit different application instances.
 
 ## Run locally with Podman
 
-Start PostgreSQL:
-
 ```bash
 podman compose up -d
-```
-
-Run the application:
-
-```bash
 gradle bootRun
 ```
 
-Integration tests use Testcontainers and require a Docker-compatible container socket. Podman users may need to expose/configure the Podman socket for Testcontainers.
-
 ## Next pressure
 
-Concurrency control identifies stale competing writes. It does not make network retries safe.
+We can now explain **what the current state is** and safely create/retry an Order, but we still do not retain a business history of how the Order reached that state.
 
-The next feature is **ORD-150 - Idempotent Order Commands**.
+The next feature is **ORD-160 - Lifecycle Audit Trail**.
