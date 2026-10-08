@@ -1,5 +1,6 @@
 package dev.stefanjakic.lifecycle.infrastructure.configuration;
 
+import dev.stefanjakic.lifecycle.application.OrderAuditRepository;
 import dev.stefanjakic.lifecycle.application.OrderCreationIdempotencyRepository;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.application.OrderService;
@@ -12,8 +13,13 @@ public class ApplicationConfiguration {
     @Bean
     OrderService orderService(
         OrderRepository repository,
-        OrderCreationIdempotencyRepository idempotencyRepository
+        OrderCreationIdempotencyRepository idempotencyRepository,
+        OrderAuditRepository auditRepository
     ) {
-        return new OrderService(repository, idempotencyRepository);
+        return new OrderService(
+            repository,
+            idempotencyRepository,
+            auditRepository
+        );
     }
 }
