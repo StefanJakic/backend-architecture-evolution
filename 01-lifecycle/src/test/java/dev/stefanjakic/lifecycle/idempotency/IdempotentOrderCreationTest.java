@@ -1,5 +1,6 @@
 package dev.stefanjakic.lifecycle.idempotency;
 
+import dev.stefanjakic.lifecycle.application.OrderAuditAction;
 import dev.stefanjakic.lifecycle.application.OrderService;
 import dev.stefanjakic.lifecycle.support.PostgresIntegrationTest;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class IdempotentOrderCreationTest extends PostgresIntegrationTest {
     private OrderService service;
 
     @Test
-    void concurrentRequestsWithTheSameKeyReturnTheSameOrder() throws Exception {
+    void concurrentRequestsWithTheSameKeyReturnOneOrderAndOneCreateAudit() throws Exception {
         String idempotencyKey = "concurrent-" + UUID.randomUUID();
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -43,6 +44,11 @@ class IdempotentOrderCreationTest extends PostgresIntegrationTest {
             String secondOrderId = second.get(10, TimeUnit.SECONDS);
 
             assertEquals(firstOrderId, secondOrderId);
+
+            var history = service.historyOf(firstOrderId);
+
+            assertEquals(1, history.size());
+            assertEquals(OrderAuditAction.CREATE, history.get(0).action());
         } finally {
             executor.shutdownNow();
         }

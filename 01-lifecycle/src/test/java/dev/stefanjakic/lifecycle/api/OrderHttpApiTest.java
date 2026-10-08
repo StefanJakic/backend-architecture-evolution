@@ -37,6 +37,29 @@ class OrderHttpApiTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void exposesLifecycleHistory() throws Exception {
+        String orderId = createOrder();
+
+        mockMvc.perform(post("/orders/{orderId}/confirm", orderId))
+            .andExpect(status().isOk());
+
+        mockMvc.perform(post("/orders/{orderId}/ship", orderId))
+            .andExpect(status().isOk());
+
+        mockMvc.perform(get("/orders/{orderId}/history", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].action").value("CREATE"))
+            .andExpect(jsonPath("$[0].fromStatus").doesNotExist())
+            .andExpect(jsonPath("$[0].toStatus").value("CREATED"))
+            .andExpect(jsonPath("$[1].action").value("CONFIRM"))
+            .andExpect(jsonPath("$[1].fromStatus").value("CREATED"))
+            .andExpect(jsonPath("$[1].toStatus").value("CONFIRMED"))
+            .andExpect(jsonPath("$[2].action").value("SHIP"))
+            .andExpect(jsonPath("$[2].toStatus").value("SHIPPED"))
+            .andExpect(jsonPath("$[2].occurredAt").exists());
+    }
+
+    @Test
     void repeatedCreateKeyReturnsTheSameOrder() throws Exception {
         String idempotencyKey = "retry-" + UUID.randomUUID();
 
@@ -44,6 +67,10 @@ class OrderHttpApiTest extends PostgresIntegrationTest {
         String retriedOrderId = createOrder(idempotencyKey);
 
         assertEquals(firstOrderId, retriedOrderId);
+
+        mockMvc.perform(get("/orders/{orderId}/history", firstOrderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
@@ -75,19 +102,24 @@ class OrderHttpApiTest extends PostgresIntegrationTest {
         mockMvc.perform(get("/orders/{orderId}", "missing-order"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+
+        mockMvc.perform(get("/orders/{orderId}/history", "missing-order"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
     }
 
     @Test
-    void returnsConflictForInvalidTransition() throws Exception {
+    void failedTransitionDoesNotAppearInHistory() throws Exception {
         String orderId = createOrder();
 
         mockMvc.perform(post("/orders/{orderId}/ship", orderId))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("INVALID_ORDER_TRANSITION"));
 
-        mockMvc.perform(get("/orders/{orderId}", orderId))
+        mockMvc.perform(get("/orders/{orderId}/history", orderId))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value("CREATED"));
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].action").value("CREATE"));
     }
 
     private String createOrder() throws Exception {
