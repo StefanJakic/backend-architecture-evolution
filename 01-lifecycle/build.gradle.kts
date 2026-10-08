@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "dev.stefanjakic.architecture"
-version = "0.9.0-SNAPSHOT"
+version = "0.10.0-SNAPSHOT"
 
 java {
     toolchain {
