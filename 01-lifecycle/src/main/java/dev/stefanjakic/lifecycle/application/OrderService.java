@@ -9,15 +9,42 @@ import java.util.UUID;
 @Transactional
 public class OrderService {
 
-    private final OrderRepository repository;
+    private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
 
-    public OrderService(OrderRepository repository) {
+    private final OrderRepository repository;
+    private final OrderCreationIdempotencyRepository idempotencyRepository;
+
+    public OrderService(
+        OrderRepository repository,
+        OrderCreationIdempotencyRepository idempotencyRepository
+    ) {
         this.repository = repository;
+        this.idempotencyRepository = idempotencyRepository;
     }
 
-    public String createOrder() {
+    public String createOrder(String idempotencyKey) {
+        validateIdempotencyKey(idempotencyKey);
+
+        var completedOrderId =
+            idempotencyRepository.findCompletedOrderId(idempotencyKey);
+
+        if (completedOrderId.isPresent()) {
+            return completedOrderId.get();
+        }
+
+        boolean claimed = idempotencyRepository.tryClaim(idempotencyKey);
+
+        if (!claimed) {
+            return idempotencyRepository.findCompletedOrderId(idempotencyKey)
+                .orElseThrow(
+                    () -> new IdempotencyResultUnavailableException(idempotencyKey)
+                );
+        }
+
         Order order = new Order(UUID.randomUUID().toString());
         repository.save(order);
+        idempotencyRepository.complete(idempotencyKey, order.id());
+
         return order.id();
     }
 
@@ -53,5 +80,19 @@ public class OrderService {
     private Order load(String orderId) {
         return repository.findById(orderId)
             .orElseThrow(() -> new OrderNotFoundException(orderId));
+    }
+
+    private void validateIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new InvalidIdempotencyKeyException(
+                "Idempotency-Key must not be blank"
+            );
+        }
+
+        if (idempotencyKey.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new InvalidIdempotencyKeyException(
+                "Idempotency-Key must not exceed 100 characters"
+            );
+        }
     }
 }

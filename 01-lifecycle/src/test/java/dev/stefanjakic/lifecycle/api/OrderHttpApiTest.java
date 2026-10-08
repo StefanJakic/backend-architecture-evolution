@@ -9,6 +9,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -31,6 +34,23 @@ class OrderHttpApiTest extends PostgresIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(orderId))
             .andExpect(jsonPath("$.status").value("CREATED"));
+    }
+
+    @Test
+    void repeatedCreateKeyReturnsTheSameOrder() throws Exception {
+        String idempotencyKey = "retry-" + UUID.randomUUID();
+
+        String firstOrderId = createOrder(idempotencyKey);
+        String retriedOrderId = createOrder(idempotencyKey);
+
+        assertEquals(firstOrderId, retriedOrderId);
+    }
+
+    @Test
+    void createRequiresIdempotencyKey() throws Exception {
+        mockMvc.perform(post("/orders"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_IDEMPOTENCY_KEY"));
     }
 
     @Test
@@ -71,7 +91,14 @@ class OrderHttpApiTest extends PostgresIntegrationTest {
     }
 
     private String createOrder() throws Exception {
-        MvcResult result = mockMvc.perform(post("/orders"))
+        return createOrder("create-" + UUID.randomUUID());
+    }
+
+    private String createOrder(String idempotencyKey) throws Exception {
+        MvcResult result = mockMvc.perform(
+                post("/orders")
+                    .header("Idempotency-Key", idempotencyKey)
+            )
             .andExpect(status().isCreated())
             .andExpect(header().exists("Location"))
             .andExpect(jsonPath("$.status").value("CREATED"))
