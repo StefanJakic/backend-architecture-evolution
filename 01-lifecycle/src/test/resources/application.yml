@@ -7,6 +7,12 @@ spring:
       properties:
         enable.idempotence: true
 
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+
 outbox:
   relay:
     enabled: false

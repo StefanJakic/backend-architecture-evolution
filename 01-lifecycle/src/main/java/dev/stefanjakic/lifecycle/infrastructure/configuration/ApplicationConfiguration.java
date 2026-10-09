@@ -4,6 +4,7 @@ import dev.stefanjakic.lifecycle.application.OrderAuditRepository;
 import dev.stefanjakic.lifecycle.application.OrderCreationIdempotencyRepository;
 import dev.stefanjakic.lifecycle.application.OrderEventTransport;
 import dev.stefanjakic.lifecycle.application.OrderOutboxRelay;
+import dev.stefanjakic.lifecycle.application.OrderOutboxRelayObserver;
 import dev.stefanjakic.lifecycle.application.OrderOutboxRelayRepository;
 import dev.stefanjakic.lifecycle.application.OrderOutboxRepository;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
@@ -36,12 +37,14 @@ public class ApplicationConfiguration {
     OrderOutboxRelay orderOutboxRelay(
         OrderOutboxRelayRepository repository,
         OrderEventTransport transport,
+        OrderOutboxRelayObserver observer,
         @Value("${outbox.relay.batch-size:100}") int batchSize,
         @Value("${outbox.relay.lease-timeout-ms:30000}") long leaseTimeoutMs
     ) {
         return new OrderOutboxRelay(
             repository,
             transport,
+            observer,
             batchSize,
             Duration.ofMillis(leaseTimeoutMs)
         );
