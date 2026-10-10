@@ -24,6 +24,7 @@ public abstract class PostgresIntegrationTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
 
+        registry.add("order.status-cache.enabled", () -> "false");
         registry.add("outbox.relay.enabled", () -> "false");
         registry.add(
             "management.otlp.metrics.export.enabled",

@@ -5,6 +5,11 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/lifecycle}
     username: ${DB_USERNAME:lifecycle}
     password: ${DB_PASSWORD:lifecycle}
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:500ms}
+      timeout: ${REDIS_READ_TIMEOUT:500ms}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -62,6 +67,9 @@ logging:
 order:
   events:
     topic: ${ORDER_EVENTS_TOPIC:order.lifecycle.v1}
+  status-cache:
+    enabled: ${ORDER_STATUS_CACHE_ENABLED:true}
+    ttl: ${ORDER_STATUS_CACHE_TTL:5m}
 
 outbox:
   relay:

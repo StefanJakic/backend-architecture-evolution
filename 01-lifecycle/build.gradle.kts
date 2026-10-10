@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "dev.stefanjakic.architecture"
-version = "0.11.0-SNAPSHOT"
+version = "0.12.0-SNAPSHOT"
 
 java {
     toolchain {
@@ -20,6 +20,7 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
