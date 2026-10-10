@@ -7,14 +7,19 @@ import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderAuditReposit
 import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderCreationIdempotencyRepository;
 import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderOutboxRepository;
 import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderRepository;
+import dev.stefanjakic.lifecycle.infrastructure.memory.InMemoryOrderStatusCache;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OrderServiceTest {
+
+    private final InMemoryOrderRepository repository =
+        new InMemoryOrderRepository();
 
     private final InMemoryOrderAuditRepository auditRepository =
         new InMemoryOrderAuditRepository();
@@ -22,11 +27,15 @@ class OrderServiceTest {
     private final InMemoryOrderOutboxRepository outboxRepository =
         new InMemoryOrderOutboxRepository();
 
+    private final InMemoryOrderStatusCache statusCache =
+        new InMemoryOrderStatusCache();
+
     private final OrderService service = new OrderService(
-        new InMemoryOrderRepository(),
+        repository,
         new InMemoryOrderCreationIdempotencyRepository(),
         auditRepository,
-        outboxRepository
+        outboxRepository,
+        statusCache
     );
 
     @Test
@@ -54,6 +63,34 @@ class OrderServiceTest {
         assertEquals(firstOrderId, retriedOrderId);
         assertEquals(1, service.historyOf(firstOrderId).size());
         assertEquals(1, outboxRepository.events().size());
+    }
+
+    @Test
+    void repeatedStatusReadUsesCacheAfterFirstRepositoryLookup() {
+        String orderId = service.createOrder("cached-read");
+
+        repository.resetFindCount();
+
+        assertEquals(OrderStatus.CREATED, service.statusOf(orderId));
+        assertEquals(OrderStatus.CREATED, service.statusOf(orderId));
+
+        assertEquals(1, repository.findCount());
+    }
+
+    @Test
+    void successfulTransitionInvalidatesCachedStatus() {
+        String orderId = service.createOrder("cache-invalidation");
+
+        assertEquals(OrderStatus.CREATED, service.statusOf(orderId));
+        assertEquals(
+            OrderStatus.CREATED,
+            statusCache.find(orderId).orElseThrow()
+        );
+
+        service.confirmOrder(orderId);
+
+        assertFalse(statusCache.find(orderId).isPresent());
+        assertEquals(OrderStatus.CONFIRMED, service.statusOf(orderId));
     }
 
     @Test
