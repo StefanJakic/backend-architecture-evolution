@@ -2,17 +2,19 @@ package dev.stefanjakic.lifecycle.support;
 
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 public abstract class PostgresIntegrationTest {
 
-    @Container
     protected static final PostgreSQLContainer POSTGRES =
         new PostgreSQLContainer("postgres:17-alpine")
             .withDatabaseName("lifecycle")
             .withUsername("lifecycle")
             .withPassword("lifecycle");
+
+    static {
+        POSTGRES.start();
+    }
 
     @DynamicPropertySource
     static void integrationTestProperties(
