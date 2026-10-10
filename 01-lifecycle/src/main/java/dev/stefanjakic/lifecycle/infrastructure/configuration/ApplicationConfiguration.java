@@ -9,6 +9,7 @@ import dev.stefanjakic.lifecycle.application.OrderOutboxRelayRepository;
 import dev.stefanjakic.lifecycle.application.OrderOutboxRepository;
 import dev.stefanjakic.lifecycle.application.OrderRepository;
 import dev.stefanjakic.lifecycle.application.OrderService;
+import dev.stefanjakic.lifecycle.application.OrderStatusCache;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,13 +24,15 @@ public class ApplicationConfiguration {
         OrderRepository repository,
         OrderCreationIdempotencyRepository idempotencyRepository,
         OrderAuditRepository auditRepository,
-        OrderOutboxRepository outboxRepository
+        OrderOutboxRepository outboxRepository,
+        OrderStatusCache statusCache
     ) {
         return new OrderService(
             repository,
             idempotencyRepository,
             auditRepository,
-            outboxRepository
+            outboxRepository,
+            statusCache
         );
     }
 

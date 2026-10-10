@@ -10,6 +10,7 @@ import java.util.Optional;
 public final class InMemoryOrderRepository implements OrderRepository {
 
     private final Map<String, Order> orders = new HashMap<>();
+    private int findCount;
 
     @Override
     public Order save(Order order) {
@@ -19,6 +20,15 @@ public final class InMemoryOrderRepository implements OrderRepository {
 
     @Override
     public Optional<Order> findById(String id) {
+        findCount++;
         return Optional.ofNullable(orders.get(id));
+    }
+
+    public int findCount() {
+        return findCount;
+    }
+
+    public void resetFindCount() {
+        findCount = 0;
     }
 }

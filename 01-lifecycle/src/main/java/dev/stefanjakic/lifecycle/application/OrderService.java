@@ -3,6 +3,7 @@ package dev.stefanjakic.lifecycle.application;
 import dev.stefanjakic.lifecycle.domain.Order;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
 import dev.stefanjakic.lifecycle.domain.event.OrderDomainEvent;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -17,17 +18,20 @@ public class OrderService {
     private final OrderCreationIdempotencyRepository idempotencyRepository;
     private final OrderAuditRepository auditRepository;
     private final OrderOutboxRepository outboxRepository;
+    private final OrderStatusCache statusCache;
 
     public OrderService(
         OrderRepository repository,
         OrderCreationIdempotencyRepository idempotencyRepository,
         OrderAuditRepository auditRepository,
-        OrderOutboxRepository outboxRepository
+        OrderOutboxRepository outboxRepository,
+        OrderStatusCache statusCache
     ) {
         this.repository = repository;
         this.idempotencyRepository = idempotencyRepository;
         this.auditRepository = auditRepository;
         this.outboxRepository = outboxRepository;
+        this.statusCache = statusCache;
     }
 
     public String createOrder(String idempotencyKey) {
@@ -63,6 +67,7 @@ public class OrderService {
         order.confirm();
         repository.save(order);
         persistEvents(order);
+        statusCache.invalidate(orderId);
     }
 
     public void shipOrder(String orderId) {
@@ -71,6 +76,7 @@ public class OrderService {
         order.ship();
         repository.save(order);
         persistEvents(order);
+        statusCache.invalidate(orderId);
     }
 
     public void completeOrder(String orderId) {
@@ -79,6 +85,7 @@ public class OrderService {
         order.complete();
         repository.save(order);
         persistEvents(order);
+        statusCache.invalidate(orderId);
     }
 
     public void cancelOrder(String orderId) {
@@ -87,11 +94,21 @@ public class OrderService {
         order.cancel();
         repository.save(order);
         persistEvents(order);
+        statusCache.invalidate(orderId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public OrderStatus statusOf(String orderId) {
-        return load(orderId).status();
+        var cached = statusCache.find(orderId);
+
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
+        OrderStatus status = load(orderId).status();
+        statusCache.put(orderId, status);
+
+        return status;
     }
 
     @Transactional(readOnly = true)
