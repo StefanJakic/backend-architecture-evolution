@@ -3,6 +3,7 @@ package dev.stefanjakic.lifecycle.application;
 import dev.stefanjakic.lifecycle.domain.Order;
 import dev.stefanjakic.lifecycle.domain.OrderStatus;
 import dev.stefanjakic.lifecycle.domain.event.OrderDomainEvent;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -96,6 +97,7 @@ public class OrderService {
         statusCache.invalidate(orderId);
     }
 
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public OrderStatus statusOf(String orderId) {
         var cached = statusCache.find(orderId);
 
