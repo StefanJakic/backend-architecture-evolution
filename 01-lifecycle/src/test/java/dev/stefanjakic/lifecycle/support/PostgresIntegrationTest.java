@@ -15,9 +15,21 @@ public abstract class PostgresIntegrationTest {
             .withPassword("lifecycle");
 
     @DynamicPropertySource
-    static void postgresProperties(DynamicPropertyRegistry registry) {
+    static void integrationTestProperties(
+        DynamicPropertyRegistry registry
+    ) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+
+        registry.add("outbox.relay.enabled", () -> "false");
+        registry.add(
+            "management.otlp.metrics.export.enabled",
+            () -> "false"
+        );
+        registry.add(
+            "management.tracing.export.otlp.enabled",
+            () -> "false"
+        );
     }
 }
