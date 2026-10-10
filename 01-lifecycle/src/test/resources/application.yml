@@ -8,6 +8,10 @@ spring:
         enable.idempotence: true
 
 management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
   tracing:
     export:
       otlp:
