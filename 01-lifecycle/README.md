@@ -1,78 +1,175 @@
 # 01 - Lifecycle / State Machine
 
-This project evolves an Order lifecycle from a small executable domain sketch into a production-oriented backend service.
+**Status: COMPLETE / FROZEN**
 
-## Current development version
+**Version: 1.0.0**
 
-**0.12.0-SNAPSHOT - Read Performance Optimization**
+This flagship skeleton evolves a simple Order lifecycle into a production-oriented backend service.
 
-Current Order status can now use an optional Redis cache-aside layer while PostgreSQL remains the source of truth.
+No additional business features are planned for this module. New learning work moves to the next skeleton instead of expanding this one indefinitely.
+
+## What this skeleton teaches
+
+The dominant problem starts simple:
+
+~~~text
+How should an Order move through valid states?
+~~~
+
+and gradually creates production pressure around:
+
+~~~text
+state ownership
+transactions
+concurrency
+idempotency
+auditability
+events
+durable messaging
+at-least-once delivery
+operability
+caching
+deployment
+~~~
 
 ## Evolution
 
-- **0.1.0 - Core Order Lifecycle**: entity-owned state transitions demonstrated from a plain Java `main()`.
-- **0.2.0 - Application Use Cases**: application boundary and repository port.
-- **0.3.0 - HTTP Order API**: Spring Boot REST API.
-- **0.4.0 - Durable Order Persistence**: PostgreSQL, Flyway, JPA, Testcontainers.
-- **0.5.0 - Concurrent Transition Protection**: optimistic locking and transaction boundaries.
-- **0.6.0 - Idempotent Order Creation**: persisted retry ownership.
-- **0.7.0 - Lifecycle Audit Trail**: durable committed history.
-- **0.8.0 - Domain Events**: named business facts.
-- **0.9.0 - Transactional Outbox**: atomic state and event persistence.
-- **0.10.0 - Reliable Kafka Publication**: lease-based at-least-once relay.
-- **0.11.0 - Operability / Production Baseline**: probes, metrics, structured logs, correlation, and tracing.
-- **0.12.0-SNAPSHOT - Read Performance Optimization**: optional Redis cache-aside for current status.
+| Version | Pressure | Main lesson |
+| --- | --- | --- |
+| 0.1 | lifecycle rules | entity owns valid state transitions |
+| 0.2 | use cases | application boundary around domain behavior |
+| 0.3 | HTTP | transport stays thin |
+| 0.4 | durability | PostgreSQL replaces process memory |
+| 0.5 | concurrent writes | optimistic locking rejects stale updates |
+| 0.6 | client retries | durable idempotency prevents duplicate creation |
+| 0.7 | traceability | append-only lifecycle audit |
+| 0.8 | reactions | explicit domain events |
+| 0.9 | commit/publish gap | transactional outbox |
+| 0.10 | external delivery | Kafka relay with at-least-once semantics |
+| 0.11 | production visibility | probes, metrics, logs, correlation, tracing |
+| 0.12 | read pressure | Redis cache-aside without moving source of truth |
+| 1.0 | runtime | Docker, Kubernetes, AWS target architecture |
 
-## Current status read
+## Final architecture
 
 ~~~text
-GET /orders/{orderId}
-       ↓
-Redis status cache
-   ↙          ↘
- hit          miss/error
- ↓                ↓
-return         PostgreSQL
-                   ↓
-                cache
-                   ↓
-                return
+                    HTTP
+                     |
+                     v
+                OrderService
+                     |
+          +----------+----------+
+          |                     |
+          v                     v
+   PostgreSQL                Redis
+   source of truth        status cache
+          |
+          +-- Order state
+          +-- optimistic version
+          +-- idempotency
+          +-- audit
+          +-- transactional outbox
+                     |
+                     v
+                Outbox Relay
+                     |
+                     v
+                   Kafka
+~~~
+
+## Write path
+
+~~~text
+HTTP command
+    ↓
+@Transactional
+    ↓
+load Order
+    ↓
+domain transition
+    ↓
+persist Order
+append audit
+append outbox
+    ↓
+COMMIT
+    ↓
+invalidate cached status
+~~~
+
+The same PostgreSQL transaction owns state, audit, outbox, and creation-idempotency completion.
+
+## Event delivery
+
+~~~text
+outbox PENDING
+    ↓
+claim batch
+    ↓
+IN_PROGRESS
+    ↓
+Kafka publish + broker ack
+    ↓
+PUBLISHED
+~~~
+
+If Kafka succeeds but marking the database row as published fails, the event is retried and may be delivered twice.
+
+Therefore:
+
+~~~text
+delivery = at-least-once
+consumer idempotency key = eventId
+~~~
+
+## Read path
+
+~~~text
+GET /orders/{id}
+      ↓
+Redis
+  hit | miss/error
+      |      ↓
+      |  PostgreSQL
+      |      ↓
+      +---- return
 ~~~
 
 PostgreSQL remains authoritative.
 
-Redis does not participate in:
+Redis is disposable acceleration and failures fall back to PostgreSQL.
 
-- lifecycle transitions
-- optimistic locking
-- idempotency
-- audit
-- outbox
-- Kafka publication
-
-## Cache consistency
-
-A successful lifecycle transition invalidates the cached status after the PostgreSQL transaction commits.
-
-Entries also have a finite TTL, defaulting to 5 minutes.
-
-Redis failures fall back to PostgreSQL and do not fail Order requests.
-
-## Cache metrics
+## Production health model
 
 ~~~text
-order.status.cache.requests{result=hit|miss}
-order.status.cache.errors{operation=read|write|invalidate}
+PostgreSQL down
+  -> readiness DOWN
+
+Kafka down
+  -> API remains ready
+  -> outbox backlog grows
+
+Redis down
+  -> API remains ready
+  -> reads fall back to PostgreSQL
 ~~~
 
-## Run locally with Podman
+Important endpoints:
+
+~~~text
+/actuator/health/liveness
+/actuator/health/readiness
+/actuator/prometheus
+~~~
+
+## Local runtime
 
 ~~~bash
 podman compose up -d
-gradle bootRun
+./gradlew bootRun
 ~~~
 
-The local environment starts:
+Local infrastructure:
 
 ~~~text
 PostgreSQL
@@ -80,24 +177,88 @@ Kafka
 Redis
 ~~~
 
-Cache settings:
+## Tests
 
-~~~text
-ORDER_STATUS_CACHE_ENABLED=true
-ORDER_STATUS_CACHE_TTL=5m
-REDIS_URL=redis://localhost:6379
+~~~bash
+./gradlew test
 ~~~
 
-## Final remaining work
+The integration suite uses Testcontainers for infrastructure behavior.
 
-One final feature remains for this skeleton:
+## Container
 
-**ORD-220 - Deployment Baseline / 1.0 Release**
+Build:
 
-- container image
-- Kubernetes manifests
-- AWS target architecture
-- production configuration notes
-- freeze `01-lifecycle` at `1.0.0`
+~~~bash
+docker build -t order-lifecycle:1.0.0 .
+~~~
 
-After that, development moves to **02-reservation / time-window concurrency**.
+Run-time configuration is supplied through environment variables.
+
+## Kubernetes
+
+~~~bash
+kubectl apply -k k8s/base
+~~~
+
+Before deployment, provide the required `order-lifecycle-runtime` secret and use an appropriate image registry/tag.
+
+See:
+
+- `docs/deployment/kubernetes-baseline.md`
+- `docs/deployment/aws-target-architecture.md`
+
+## AWS target
+
+The documented production mapping is:
+
+~~~text
+ALB
+ ↓
+EKS
+ ├── RDS PostgreSQL Multi-AZ
+ ├── Amazon MSK
+ └── ElastiCache Redis/Valkey
+~~~
+
+with ECR for images, managed secret injection, Prometheus-compatible metrics, structured logs, and OpenTelemetry traces.
+
+## Architecture decisions
+
+The ADRs in `docs/architecture/adr` record why the design evolved instead of only showing the final code.
+
+Important examples:
+
+- optimistic locking rather than silent lost updates
+- idempotency in PostgreSQL rather than Redis
+- domain events before distributed messaging
+- transactional outbox before Kafka
+- at-least-once rather than false exactly-once claims
+- Kafka degradation separate from HTTP readiness
+- cache-aside with PostgreSQL as source of truth
+- application runtime contract separate from cloud provisioning
+
+## Freeze rule
+
+This module is intentionally closed at **1.0.0**.
+
+Do not add another technology simply because it can fit.
+
+A new dominant problem belongs in a new skeleton.
+
+## Next
+
+**02 - Reservation / Time Window**
+
+Focus:
+
+~~~text
+time overlap
+concurrent reservations
+database constraints
+pessimistic vs optimistic locking
+temporary holds
+expiry
+~~~
+
+Unlike this flagship module, the next skeleton will be much smaller and will stop once those lessons are demonstrated.
