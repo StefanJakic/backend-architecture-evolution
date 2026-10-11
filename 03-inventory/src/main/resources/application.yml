@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: inventory-evolution
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/inventory}
+    username: ${DB_USERNAME:inventory}
+    password: ${DB_PASSWORD:inventory}
+  flyway:
+    enabled: true
