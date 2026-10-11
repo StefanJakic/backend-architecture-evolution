@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Primary;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -183,6 +184,21 @@ class ConcurrentReservationRaceTest extends PostgresIntegrationTest {
         @Override
         public void save(Reservation reservation) {
             delegate.save(reservation);
+        }
+
+        @Override
+        public void update(Reservation reservation) {
+            delegate.update(reservation);
+        }
+
+        @Override
+        public Optional<Reservation> findById(String reservationId) {
+            return delegate.findById(reservationId);
+        }
+
+        @Override
+        public int expireHolds(Instant now) {
+            return delegate.expireHolds(now);
         }
 
         @Override
