@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.3.0-SNAPSHOT - Lock-Aware Selection with SKIP LOCKED**
+**0.4.0-SNAPSHOT - Multi-Worker Claiming**
 
 This focused skeleton studies selection and exclusive claiming.
 
@@ -10,9 +10,19 @@ This focused skeleton studies selection and exclusive claiming.
 
 > When several pieces of work are eligible, how do we select and claim exactly one without duplicate assignment?
 
-## Evolution so far
+## Learning path
 
-### ASG-101 - Deterministic selection
+~~~text
+ASG-101  Eligibility + deterministic selection
+    ↓
+ASG-110  Select-then-claim race
+    ↓
+ASG-120  SELECT FOR UPDATE SKIP LOCKED
+    ↓
+ASG-130  Multi-worker claiming / fairness
+~~~
+
+## 1. Deterministic selection
 
 ~~~text
 eligible jobs only
@@ -24,7 +34,9 @@ stable ID tie-breaker
 
 This makes local choice reproducible.
 
-### ASG-110 - Select-then-claim race
+It does not create ownership.
+
+## 2. Duplicate assignment race
 
 The naive persistence flow:
 
@@ -36,9 +48,9 @@ UPDATE later
 
 allowed two schedulers to select the same job and both return successful ownership.
 
-### ASG-120 - Lock-aware candidate selection
+## 3. Lock-aware selection
 
-Selection now uses:
+Claiming now uses:
 
 ~~~sql
 SELECT id, required_capability, priority
@@ -52,51 +64,69 @@ FOR UPDATE SKIP LOCKED
 
 The selected row remains locked until the same transaction records the claim and commits.
 
-## Concurrent result
+## 4. Multi-worker verification
 
-With two eligible jobs:
+The final pressure test uses:
 
 ~~~text
-Job-1 priority 100
-Job-2 priority 90
+10 pending jobs
+20 concurrent workers
 ~~~
 
-and two schedulers:
+Required result:
 
 ~~~text
-A locks Job-1
-B skips Job-1
-B locks Job-2
-
-A -> Assignment(Job-1, Worker-A)
-B -> Assignment(Job-2, Worker-B)
+10 successful assignments
+10 no-job outcomes
+10 unique claimed job IDs
+0 duplicates
 ~~~
 
-The exact worker/job pairing may vary by scheduling, but the job IDs must be different.
-
-## Key lesson
+Strong invariant:
 
 ~~~text
-selection
-+
-transactional row lock
-+
-claim before commit
+successful assignment count
 =
-exclusive ownership
+unique claimed job count
 ~~~
 
-## Why SKIP LOCKED?
+Every successful assignment must also match the final database claimant.
 
-It avoids unnecessary waiting when another eligible candidate exists.
+## Ordering and fairness
+
+`ORDER BY priority DESC` still matters.
+
+But with `SKIP LOCKED`, a worker selects the highest-priority row **currently available to its transaction**.
+
+A higher-priority row that is already locked can be skipped in favor of the next one.
+
+Therefore:
 
 ~~~text
-best row locked?
-    -> skip it
-    -> try next eligible row
+priority ordering
+!=
+strict global fairness under concurrency
 ~~~
 
-That is useful for queue-like claiming.
+SKIP LOCKED is primarily a throughput/progress mechanism for queue-like workloads.
+
+## Crash boundary
+
+Before commit:
+
+~~~text
+process dies
+-> transaction rolls back
+-> row lock is released
+~~~
+
+After CLAIMED is committed, recovering work from a dead worker requires a different lifecycle:
+
+~~~text
+lease / heartbeat / timeout / requeue
+~~~
+
+That is intentionally outside this skeleton.
 
 ## Contrast with inventory
 
@@ -106,19 +136,19 @@ known hot counter
 -> atomic conditional UPDATE
 
 04 assignment:
-select one candidate from a set
+select one row from a candidate set
 -> FOR UPDATE SKIP LOCKED
 ~~~
 
-Different invariant shape, different concurrency mechanism.
+The concurrency mechanism follows the shape of the invariant.
 
 ## Evolution
 
 ~~~text
 ASG-101  Eligibility + deterministic selection
 ASG-110  PostgreSQL select-then-claim race
-ASG-120  SELECT FOR UPDATE SKIP LOCKED          <- current
-ASG-130  Multi-worker claiming / fairness notes
+ASG-120  SELECT FOR UPDATE SKIP LOCKED
+ASG-130  Multi-worker claiming / fairness      <- current
 1.0      Freeze
 ~~~
 
@@ -128,6 +158,4 @@ ASG-130  Multi-worker claiming / fairness notes
 ./gradlew test
 ~~~
 
-## Next pressure
-
-ASG-130 will run several workers against several pending jobs and verify that claimed job IDs stay unique while discussing ordering and fairness under concurrent SKIP LOCKED workers.
+After this feature is verified, only the **1.0 freeze** remains.
