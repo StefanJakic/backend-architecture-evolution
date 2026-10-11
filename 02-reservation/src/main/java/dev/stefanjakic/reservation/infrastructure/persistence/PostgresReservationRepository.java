@@ -2,7 +2,9 @@ package dev.stefanjakic.reservation.infrastructure.persistence;
 
 import dev.stefanjakic.reservation.application.ReservationRepository;
 import dev.stefanjakic.reservation.domain.Reservation;
+import dev.stefanjakic.reservation.domain.ReservationConflictException;
 import dev.stefanjakic.reservation.domain.TimeWindow;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -15,6 +17,8 @@ import java.util.List;
 @Repository
 public class PostgresReservationRepository
     implements ReservationRepository {
+
+    private static final String EXCLUSION_VIOLATION_SQL_STATE = "23P01";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -48,21 +52,32 @@ public class PostgresReservationRepository
 
     @Override
     public void save(Reservation reservation) {
-        jdbcTemplate.update(
-            """
-            INSERT INTO reservation (
-                id,
-                resource_id,
-                starts_at,
-                ends_at
-            )
-            VALUES (?, ?, ?, ?)
-            """,
-            reservation.id(),
-            reservation.resourceId(),
-            utc(reservation.window().start()),
-            utc(reservation.window().end())
-        );
+        try {
+            jdbcTemplate.update(
+                """
+                INSERT INTO reservation (
+                    id,
+                    resource_id,
+                    starts_at,
+                    ends_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                reservation.id(),
+                reservation.resourceId(),
+                utc(reservation.window().start()),
+                utc(reservation.window().end())
+            );
+        } catch (DataIntegrityViolationException exception) {
+            if (isExclusionViolation(exception)) {
+                throw new ReservationConflictException(
+                    reservation.resourceId(),
+                    reservation.window()
+                );
+            }
+
+            throw exception;
+        }
     }
 
     @Override
@@ -77,6 +92,25 @@ public class PostgresReservationRepository
             this::mapReservation,
             resourceId
         );
+    }
+
+    private boolean isExclusionViolation(Throwable exception) {
+        Throwable current = exception;
+
+        while (current != null) {
+            if (
+                current instanceof SQLException sqlException
+                    && EXCLUSION_VIOLATION_SQL_STATE.equals(
+                        sqlException.getSQLState()
+                    )
+            ) {
+                return true;
+            }
+
+            current = current.getCause();
+        }
+
+        return false;
     }
 
     private Reservation mapReservation(

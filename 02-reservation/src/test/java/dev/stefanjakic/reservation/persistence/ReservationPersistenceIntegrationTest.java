@@ -68,6 +68,26 @@ class ReservationPersistenceIntegrationTest
         );
     }
 
+    @Test
+    void sameWindowIsAllowedForDifferentResources() {
+        TimeWindow window = window("10:00:00", "11:00:00");
+
+        String firstResource = "room-" + UUID.randomUUID();
+        String secondResource = "room-" + UUID.randomUUID();
+
+        service.reserve(firstResource, window);
+        service.reserve(secondResource, window);
+
+        assertEquals(
+            1,
+            repository.findByResourceId(firstResource).size()
+        );
+        assertEquals(
+            1,
+            repository.findByResourceId(secondResource).size()
+        );
+    }
+
     private TimeWindow window(String start, String end) {
         return new TimeWindow(
             Instant.parse("2026-10-11T" + start + "Z"),
