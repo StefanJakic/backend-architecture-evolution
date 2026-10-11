@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.1.0-SNAPSHOT - Small Policy Variation Stays Local**
+**0.2.0-SNAPSHOT - Growing Rules Justify Policy Extraction**
 
 This focused skeleton studies behavior variation and the point at which an abstraction becomes justified.
 
@@ -10,33 +10,60 @@ This focused skeleton studies behavior variation and the point at which an abstr
 
 > When the same use case behaves differently under different business rules, where should that variation live?
 
-## Current use case
+## Evolution so far
 
-Cancellation refund calculation.
+### POL-101 - Keep small variation local
 
-~~~text
-FLEXIBLE
-  >= 24h -> 100%
-  < 24h  -> 50%
-
-STRICT
-  >= 168h -> 100%
-  < 168h  -> 0%
-~~~
-
-## Current design
+The first version used:
 
 ~~~text
 CancellationService
     |
-    +-- explicit switch
+    +-- switch(FLEXIBLE / STRICT)
 ~~~
 
-There is intentionally **no policy interface yet**.
+With two short branches, that was intentionally the simpler design.
 
-With two short branches, the switch is currently easier to read than several tiny strategy classes.
+### POL-110 - Extract behavior after real divergence
 
-## Current lesson
+The policy curves now differ independently:
+
+~~~text
+FLEXIBLE
+  >= 72h -> 100%
+  >= 24h -> 75%
+  < 24h  -> 50%
+
+STRICT
+  >= 336h -> 100%
+  >= 168h -> 50%
+  < 168h  -> 0%
+~~~
+
+The design becomes:
+
+~~~text
+CancellationService
+        |
+        v
+CancellationPolicy
+    /           \
+Flexible       Strict
+Policy         Policy
+~~~
+
+## Service responsibility
+
+`CancellationService` no longer knows:
+
+- FLEXIBLE thresholds
+- STRICT thresholds
+- refund percentages
+- policy-specific branching
+
+It only delegates the variable behavior.
+
+## Key lesson
 
 ~~~text
 variation exists
@@ -44,13 +71,37 @@ variation exists
 abstraction is automatically justified
 ~~~
 
-A local branch is acceptable while the behavior is small and cohesive.
+but also:
 
-## Planned evolution
+~~~text
+independently growing variation
+=
+real pressure for abstraction
+~~~
+
+POL-101 was not a mistake that POL-110 fixes.
+
+The design changed because the problem changed.
+
+## Why composition?
+
+The use case remains cancellation.
+
+Only the refund behavior varies.
+
+Therefore:
+
+~~~text
+CancellationService HAS-A CancellationPolicy
+~~~
+
+is more accurate than creating a service inheritance hierarchy.
+
+## Evolution
 
 ~~~text
 POL-101  small policy variation stays local
-POL-110  growing rules justify policy extraction
+POL-110  growing rules justify policy extraction      <- current
 POL-120  select policy by business context
 POL-130  composition vs inheritance / branch trade-offs
 1.0      Freeze
@@ -64,6 +115,10 @@ POL-130  composition vs inheritance / branch trade-offs
 
 ## Next pressure
 
-POL-110 will make the policies diverge enough that the service starts owning too much policy-specific behavior.
+We now know how each policy behaves.
 
-That is the point where composition through explicit policy objects should become simpler than the switch.
+POL-120 asks a separate question:
+
+> Given business context such as CancellationTerms, who chooses the correct policy?
+
+That selection should not push FLEXIBLE/STRICT branching back into the use-case service.
