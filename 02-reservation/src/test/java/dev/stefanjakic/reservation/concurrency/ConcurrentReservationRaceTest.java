@@ -3,6 +3,7 @@ package dev.stefanjakic.reservation.concurrency;
 import dev.stefanjakic.reservation.application.ReservationRepository;
 import dev.stefanjakic.reservation.application.ReservationService;
 import dev.stefanjakic.reservation.domain.Reservation;
+import dev.stefanjakic.reservation.domain.ReservationConflictException;
 import dev.stefanjakic.reservation.domain.TimeWindow;
 import dev.stefanjakic.reservation.infrastructure.persistence.PostgresReservationRepository;
 import dev.stefanjakic.reservation.support.PostgresIntegrationTest;
@@ -40,7 +41,7 @@ class ConcurrentReservationRaceTest extends PostgresIntegrationTest {
     private PostgresReservationRepository postgresRepository;
 
     @Test
-    void checkThenInsertAllowsDoubleBookingUnderConcurrency()
+    void databaseAllowsOnlyOneOverlappingReservationToCommit()
         throws Exception {
 
         String resourceId = "room-" + UUID.randomUUID();
@@ -52,11 +53,11 @@ class ConcurrentReservationRaceTest extends PostgresIntegrationTest {
 
         try {
             var firstAttempt = pool.submit(
-                () -> service.reserve(resourceId, first)
+                () -> attempt(resourceId, first)
             );
 
             var secondAttempt = pool.submit(
-                () -> service.reserve(resourceId, second)
+                () -> attempt(resourceId, second)
             );
 
             assertTrue(
@@ -68,19 +69,49 @@ class ConcurrentReservationRaceTest extends PostgresIntegrationTest {
 
             coordinatedRepository.releaseChecks();
 
-            firstAttempt.get(5, TimeUnit.SECONDS);
-            secondAttempt.get(5, TimeUnit.SECONDS);
+            AttemptResult firstResult =
+                firstAttempt.get(5, TimeUnit.SECONDS);
+            AttemptResult secondResult =
+                secondAttempt.get(5, TimeUnit.SECONDS);
 
-            List<Reservation> stored =
-                postgresRepository.findByResourceId(resourceId);
+            List<AttemptResult> results = List.of(
+                firstResult,
+                secondResult
+            );
 
-            assertEquals(2, stored.size());
-            assertTrue(
-                stored.get(0).window().overlaps(stored.get(1).window())
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(result -> result == AttemptResult.SUCCESS)
+                    .count()
+            );
+
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(result -> result == AttemptResult.CONFLICT)
+                    .count()
+            );
+
+            assertEquals(
+                1,
+                postgresRepository.findByResourceId(resourceId).size()
             );
         } finally {
             coordinatedRepository.releaseChecks();
             pool.shutdownNow();
+        }
+    }
+
+    private AttemptResult attempt(
+        String resourceId,
+        TimeWindow window
+    ) {
+        try {
+            service.reserve(resourceId, window);
+            return AttemptResult.SUCCESS;
+        } catch (ReservationConflictException exception) {
+            return AttemptResult.CONFLICT;
         }
     }
 
@@ -89,6 +120,11 @@ class ConcurrentReservationRaceTest extends PostgresIntegrationTest {
             Instant.parse("2026-10-11T" + start + "Z"),
             Instant.parse("2026-10-11T" + end + "Z")
         );
+    }
+
+    private enum AttemptResult {
+        SUCCESS,
+        CONFLICT
     }
 
     @TestConfiguration(proxyBeanMethods = false)
