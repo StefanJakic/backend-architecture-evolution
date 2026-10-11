@@ -2,20 +2,18 @@
 
 ## Status
 
-**0.3.0-SNAPSHOT - Database-Enforced No-Overlap**
+**0.4.0-SNAPSHOT - Temporary Hold + Expiry**
 
 This is a focused learning skeleton, intentionally much smaller than `01-lifecycle`.
 
 ## Dominant problem
 
 ~~~text
-Can this resource be reserved during this time window
-even when multiple transactions compete?
+How do we protect a scarce resource across time
+when multiple transactions compete and bookings can be temporary?
 ~~~
 
-The core mental model is **time + concurrency**.
-
-## Interval semantics
+## Core interval rule
 
 Reservations use half-open windows:
 
@@ -31,120 +29,158 @@ AND
 B.start < A.end
 ~~~
 
-So exact adjacency is valid.
+Exact adjacency is valid.
 
-## Evolution so far
+## Evolution
 
-### RSV-101
+### RSV-101 - Time model
 
-Model the time invariant correctly in Java.
+Model overlap correctly in Java.
 
-### RSV-110
+### RSV-110 - Race
 
-Persist it and prove this race:
-
-~~~text
-Tx A: SELECT overlap -> false
-Tx B: SELECT overlap -> false
-Tx A: INSERT
-Tx B: INSERT
-=> double booking
-~~~
-
-### RSV-120
-
-Move the final invariant into PostgreSQL:
+Prove that:
 
 ~~~text
-EXCLUDE USING gist (
-    resource_id WITH =,
-    time_range WITH &&
-)
+check overlap
+then insert
 ~~~
 
-Now the same race becomes:
+can double-book under concurrency even inside transactions.
+
+### RSV-120 - Database invariant
+
+PostgreSQL GiST exclusion constraint changes:
 
 ~~~text
-Tx A: check -> false
-Tx B: check -> false
-
-both INSERT
-
-=> 1 success
-=> 1 conflict
-=> 1 stored reservation
+2 concurrent overlapping commits
 ~~~
 
-## Key distinction
+into:
 
 ~~~text
-application validation
-    = early / friendly rejection
-
-database constraint
-    = concurrency correctness
+1 success
+1 conflict
 ~~~
 
-The application still checks for overlap.
+### RSV-130 - Hold + expiry
 
-It no longer relies on that check as the guarantee.
-
-## Why PostgreSQL fits this invariant
-
-The conflict is not two updates to one Reservation row.
-
-It is:
+Add:
 
 ~~~text
-same resource
-+
-overlapping range
-+
-different rows
+HELD
+CONFIRMED
+EXPIRED
 ~~~
 
-That is why ordinary optimistic locking is not the natural solution here.
+A hold has an `expiresAt`.
+
+~~~text
+HELD before deadline
+    -> blocks slot
+
+HELD after deadline
+    -> EXPIRED
+    -> releases slot
+
+HELD confirmed before deadline
+    -> CONFIRMED
+    -> keeps blocking
+~~~
+
+## Active database invariant
+
+Only active rows participate in no-overlap enforcement:
+
+~~~text
+HELD       -> active
+CONFIRMED  -> active
+EXPIRED    -> inactive
+~~~
+
+Conceptually:
+
+~~~sql
+EXCLUDE USING gist (...)
+WHERE status IN ('HELD', 'CONFIRMED')
+~~~
+
+The application still performs an overlap SELECT for early rejection.
+
+PostgreSQL remains the final concurrency guarantee.
+
+## Expiry strategy
+
+Before a new booking decision:
+
+~~~text
+expire old HELD rows
+    ↓
+check overlap
+    ↓
+attempt write
+~~~
+
+There is also an explicit:
+
+~~~text
+expireExpiredHolds()
+~~~
+
+operation that a future scheduler could call.
+
+No scheduler framework is added here.
+
+## Why Clock?
+
+The service receives `java.time.Clock`.
+
+Production:
+
+~~~text
+Clock.systemUTC()
+~~~
+
+Tests use a mutable Clock so expiry is deterministic and does not require sleeps.
 
 ## Current architecture
 
 ~~~text
 ReservationService
       |
-      | advisory overlap check
+      +-- Clock
+      |
       v
 ReservationRepository
       |
       v
 PostgreSQL
       |
-      +-- CHECK start < end
-      +-- GiST exclusion constraint
-          same resource + overlapping range forbidden
+      +-- reservation state
+      +-- expires_at
+      +-- partial GiST exclusion constraint
 ~~~
 
 ## Run
 
 ~~~bash
 podman compose up -d
-gradle test
+./gradlew test
 ~~~
 
-## Remaining scope
+If the wrapper is not yet committed in this module, use the wrapper you generated locally or run with a compatible Gradle version.
+
+## Scope complete
+
+The intended feature path is now complete:
 
 ~~~text
 RSV-101  Core time-window model
-RSV-110  PostgreSQL + race
-RSV-120  Database-enforced no-overlap    <- current
-RSV-130  Temporary hold + expiry
-1.0      Freeze
+RSV-110  PostgreSQL + check-then-insert race
+RSV-120  Database-enforced no-overlap
+RSV-130  Temporary hold + expiry          <- current
 ~~~
 
-No HTTP, Kafka, Redis, outbox, or Kubernetes will be added to this skeleton.
+After this branch is verified, only a tiny **1.0 freeze** remains.
 
-## Next
-
-RSV-130 asks a different time question:
-
-> What if a user needs five minutes to finish payment before the booking becomes permanent?
-
-That introduces temporary holds and expiry without reopening the already-solved double-booking problem.
+No HTTP, Kafka, Redis, outbox, Kubernetes, or AWS layers will be added to this skeleton.
