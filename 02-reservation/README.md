@@ -1,21 +1,32 @@
 # 02 - Reservation / Time Window
 
-## Status
+**Status: COMPLETE / FROZEN**
 
-**0.4.0-SNAPSHOT - Temporary Hold + Expiry**
+**Version: 1.0.0**
 
-This is a focused learning skeleton, intentionally much smaller than `01-lifecycle`.
+This focused skeleton explores one dominant backend problem:
 
-## Dominant problem
+> How do we protect a scarce resource across time when multiple transactions compete and bookings can be temporary?
+
+Unlike `01-lifecycle`, this module deliberately stops once that problem is understood.
+
+## Final learning path
 
 ~~~text
-How do we protect a scarce resource across time
-when multiple transactions compete and bookings can be temporary?
+RSV-101  Time-window semantics
+    ↓
+RSV-110  Check-then-insert race
+    ↓
+RSV-120  Database-enforced no-overlap
+    ↓
+RSV-130  Temporary hold + expiry
+    ↓
+1.0      Freeze
 ~~~
 
-## Core interval rule
+## 1. Time-window semantics
 
-Reservations use half-open windows:
+Reservations use half-open intervals:
 
 ~~~text
 [start, end)
@@ -29,126 +40,149 @@ AND
 B.start < A.end
 ~~~
 
-Exact adjacency is valid.
-
-## Evolution
-
-### RSV-101 - Time model
-
-Model overlap correctly in Java.
-
-### RSV-110 - Race
-
-Prove that:
+Therefore:
 
 ~~~text
-check overlap
-then insert
+10:00-11:00
+11:00-12:00
 ~~~
 
-can double-book under concurrency even inside transactions.
+are adjacent rather than conflicting.
 
-### RSV-120 - Database invariant
+## 2. Why application validation is not concurrency control
 
-PostgreSQL GiST exclusion constraint changes:
+The naive transaction was:
 
 ~~~text
-2 concurrent overlapping commits
+SELECT whether overlap exists
+if none:
+    INSERT reservation
 ~~~
 
-into:
+Under READ COMMITTED:
 
 ~~~text
-1 success
-1 conflict
+Tx A: SELECT -> no conflict
+Tx B: SELECT -> no conflict
+
+Tx A: INSERT
+Tx B: INSERT
 ~~~
 
-### RSV-130 - Hold + expiry
+Both decisions can be locally correct while the final state is globally invalid.
 
-Add:
+The deterministic concurrency test exists specifically to prove this interleaving.
+
+## 3. Database-enforced invariant
+
+PostgreSQL becomes the final arbiter with a GiST exclusion constraint.
+
+Conceptually:
+
+~~~text
+same resource
+AND
+overlapping active time range
+=> reject write
+~~~
+
+The application overlap SELECT remains useful for early rejection.
+
+It is not the correctness guarantee.
+
+This distinction is central:
+
+~~~text
+application validation
+    = UX / fast fail
+
+database constraint
+    = concurrency correctness
+~~~
+
+## 4. Temporary holds
+
+Reservations evolve into:
+
+~~~text
+HELD
+  -> CONFIRMED
+or
+  -> EXPIRED
+~~~
+
+Semantics:
+
+~~~text
+HELD       -> blocks capacity temporarily
+CONFIRMED  -> blocks capacity permanently
+EXPIRED    -> remains stored, no longer blocks
+~~~
+
+The exclusion constraint applies only to active states:
 
 ~~~text
 HELD
 CONFIRMED
+~~~
+
+so expired historical rows remain in the database without consuming capacity.
+
+## 5. Expiry is explicit state
+
+Expiry is not hidden inside a query using wall-clock time.
+
+Instead:
+
+~~~text
+HELD + expiresAt <= now
+    ↓
 EXPIRED
 ~~~
 
-A hold has an `expiresAt`.
+The service uses `java.time.Clock` so tests can advance time deterministically.
+
+No `Thread.sleep()` is required.
+
+## 6. Transaction-boundary lesson
+
+Expiry cleanup originally happened inside the same transaction as `confirmHold()`.
+
+That created this bug:
 
 ~~~text
-HELD before deadline
-    -> blocks slot
+BEGIN
+mark HELD -> EXPIRED
+confirm fails
+ROLLBACK
 
-HELD after deadline
-    -> EXPIRED
-    -> releases slot
-
-HELD confirmed before deadline
-    -> CONFIRMED
-    -> keeps blocking
+=> reservation becomes HELD again
 ~~~
 
-## Active database invariant
-
-Only active rows participate in no-overlap enforcement:
+The final design performs expiry in a separate `REQUIRES_NEW` transaction:
 
 ~~~text
-HELD       -> active
-CONFIRMED  -> active
-EXPIRED    -> inactive
-~~~
-
-Conceptually:
-
-~~~sql
-EXCLUDE USING gist (...)
-WHERE status IN ('HELD', 'CONFIRMED')
-~~~
-
-The application still performs an overlap SELECT for early rejection.
-
-PostgreSQL remains the final concurrency guarantee.
-
-## Expiry strategy
-
-Before a new booking decision:
-
-~~~text
-expire old HELD rows
+expire stale holds
     ↓
-check overlap
+COMMIT
+
+then
     ↓
-attempt write
+reserve / hold / confirm
 ~~~
 
-There is also an explicit:
+This makes expiry durable maintenance state even if the command that triggered cleanup later fails.
 
-~~~text
-expireExpiredHolds()
-~~~
-
-operation that a future scheduler could call.
-
-No scheduler framework is added here.
-
-## Why Clock?
-
-The service receives `java.time.Clock`.
-
-Production:
-
-~~~text
-Clock.systemUTC()
-~~~
-
-Tests use a mutable Clock so expiry is deterministic and does not require sleeps.
-
-## Current architecture
+## Final architecture
 
 ~~~text
 ReservationService
       |
       +-- Clock
+      |
+      +-- ReservationExpiryService
+      |       |
+      |       +-- REQUIRES_NEW
       |
       v
 ReservationRepository
@@ -156,10 +190,42 @@ ReservationRepository
       v
 PostgreSQL
       |
-      +-- reservation state
-      +-- expires_at
+      +-- start < end CHECK
+      +-- status / expires_at
       +-- partial GiST exclusion constraint
 ~~~
+
+## What this skeleton teaches
+
+- half-open interval modeling
+- overlap predicates
+- READ COMMITTED visibility
+- deterministic concurrency testing
+- why `@Transactional` is not automatic serialization
+- why optimistic locking does not naturally solve competing INSERTs
+- PostgreSQL range types
+- GiST exclusion constraints
+- database-enforced invariants
+- partial constraints for active state
+- temporary holds
+- expiry
+- `Clock`-driven time testing
+- transaction propagation and `REQUIRES_NEW`
+
+## Deliberately not included
+
+This module does not add:
+
+- HTTP API
+- Kafka
+- Redis
+- outbox
+- payments
+- scheduler framework
+- Kubernetes
+- AWS deployment
+
+Those would repeat lessons from other skeletons without improving the core time/concurrency model.
 
 ## Run
 
@@ -168,19 +234,18 @@ podman compose up -d
 ./gradlew test
 ~~~
 
-If the wrapper is not yet committed in this module, use the wrapper you generated locally or run with a compatible Gradle version.
+The Gradle wrapper is committed and pinned to Gradle 8.14.3.
 
-## Scope complete
+## Freeze rule
 
-The intended feature path is now complete:
+This module is intentionally closed at **1.0.0**.
 
-~~~text
-RSV-101  Core time-window model
-RSV-110  PostgreSQL + check-then-insert race
-RSV-120  Database-enforced no-overlap
-RSV-130  Temporary hold + expiry          <- current
-~~~
+A new architecture pressure belongs in a new skeleton.
 
-After this branch is verified, only a tiny **1.0 freeze** remains.
+## Next
 
-No HTTP, Kafka, Redis, outbox, Kubernetes, or AWS layers will be added to this skeleton.
+**03 - Scarce Resource / Inventory**
+
+Dominant question:
+
+> How do we prevent overselling when many requests decrement the same quantity concurrently?
