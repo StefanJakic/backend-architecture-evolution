@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.2.0-SNAPSHOT - Growing Rules Justify Policy Extraction**
+**0.3.0-SNAPSHOT - Policy Resolution by Business Context**
 
 This focused skeleton studies behavior variation and the point at which an abstraction becomes justified.
 
@@ -14,33 +14,15 @@ This focused skeleton studies behavior variation and the point at which an abstr
 
 ### POL-101 - Keep small variation local
 
-The first version used:
-
 ~~~text
 CancellationService
     |
     +-- switch(FLEXIBLE / STRICT)
 ~~~
 
-With two short branches, that was intentionally the simpler design.
+With two short branches, the local switch was the clearest design.
 
-### POL-110 - Extract behavior after real divergence
-
-The policy curves now differ independently:
-
-~~~text
-FLEXIBLE
-  >= 72h -> 100%
-  >= 24h -> 75%
-  < 24h  -> 50%
-
-STRICT
-  >= 336h -> 100%
-  >= 168h -> 50%
-  < 168h  -> 0%
-~~~
-
-The design becomes:
+### POL-110 - Extract independently growing behavior
 
 ~~~text
 CancellationService
@@ -52,57 +34,81 @@ Flexible       Strict
 Policy         Policy
 ~~~
 
-## Service responsibility
+The service stopped owning policy-specific thresholds and percentages.
 
-`CancellationService` no longer knows:
+### POL-120 - Separate policy selection from policy behavior
 
-- FLEXIBLE thresholds
-- STRICT thresholds
-- refund percentages
-- policy-specific branching
-
-It only delegates the variable behavior.
-
-## Key lesson
+Callers now provide a business label:
 
 ~~~text
-variation exists
-!=
-abstraction is automatically justified
+CancellationTerms
 ~~~
 
-but also:
+which is resolved through:
 
 ~~~text
-independently growing variation
-=
-real pressure for abstraction
+CancellationTerms
+        |
+        v
+CancellationPolicyResolver
+        |
+        v
+CancellationPolicy
+        |
+        v
+CancellationService
 ~~~
 
-POL-101 was not a mistake that POL-110 fixes.
-
-The design changed because the problem changed.
-
-## Why composition?
-
-The use case remains cancellation.
-
-Only the refund behavior varies.
-
-Therefore:
+## Responsibility split
 
 ~~~text
-CancellationService HAS-A CancellationPolicy
+CancellationTerms
+    -> which business terms apply
+
+CancellationPolicyResolver
+    -> which behavior implements those terms
+
+CancellationPolicy
+    -> how refund behavior works
+
+CancellationService
+    -> execute the use case
 ~~~
 
-is more accurate than creating a service inheritance hierarchy.
+The service contains no FLEXIBLE/STRICT branch.
+
+## Why explicit mapping?
+
+The standard resolver uses an explicit enum mapping.
+
+For two known policies this is clearer than:
+
+- reflection
+- annotations
+- service discovery
+- framework scanning
+
+Abstraction should remove complexity, not hide a tiny amount of wiring behind magic.
+
+## Current lesson
+
+~~~text
+behavior variation
+and
+behavior selection
+are different responsibilities
+~~~
+
+POL-110 solved the first.
+
+POL-120 solves the second.
 
 ## Evolution
 
 ~~~text
 POL-101  small policy variation stays local
-POL-110  growing rules justify policy extraction      <- current
-POL-120  select policy by business context
+POL-110  growing rules justify policy extraction
+POL-120  select policy by business context           <- current
 POL-130  composition vs inheritance / branch trade-offs
 1.0      Freeze
 ~~~
@@ -115,10 +121,12 @@ POL-130  composition vs inheritance / branch trade-offs
 
 ## Next pressure
 
-We now know how each policy behaves.
+POL-130 will finish the learning path by comparing the three shapes directly:
 
-POL-120 asks a separate question:
+~~~text
+local branch
+composition
+inheritance
+~~~
 
-> Given business context such as CancellationTerms, who chooses the correct policy?
-
-That selection should not push FLEXIBLE/STRICT branching back into the use-case service.
+and documenting the selection criteria instead of declaring one pattern universally best.
