@@ -16,7 +16,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -41,15 +43,25 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
     private PostgresAssignmentRepository postgresRepository;
 
     @Test
-    void selectThenClaimCanAssignSameJobToTwoWorkers()
+    void lockedSelectionGivesConcurrentWorkersDifferentJobs()
         throws Exception {
 
         String suffix = UUID.randomUUID().toString();
-        String jobId = "job-" + suffix;
 
-        postgresRepository.insert(
-            new Job(jobId, "JAVA", 100)
+        Job firstJob = new Job(
+            "job-1-" + suffix,
+            "JAVA",
+            100
         );
+
+        Job secondJob = new Job(
+            "job-2-" + suffix,
+            "JAVA",
+            90
+        );
+
+        postgresRepository.insert(firstJob);
+        postgresRepository.insert(secondJob);
 
         Worker firstWorker = new Worker(
             "worker-a-" + suffix,
@@ -73,10 +85,10 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
             );
 
             assertTrue(
-                coordinatedRepository.awaitBothSelections(
+                coordinatedRepository.awaitBothLockedSelections(
                     Duration.ofSeconds(5)
                 ),
-                "Both schedulers should select while the job is still pending"
+                "Both schedulers should select and lock different jobs"
             );
 
             coordinatedRepository.releaseSelections();
@@ -87,21 +99,28 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
             Assignment second =
                 secondAttempt.get(5, TimeUnit.SECONDS);
 
-            assertEquals(jobId, first.jobId());
-            assertEquals(jobId, second.jobId());
+            assertNotEquals(first.jobId(), second.jobId());
 
-            assertNotEquals(
-                first.workerId(),
-                second.workerId()
+            assertEquals(
+                Set.of(firstJob.id(), secondJob.id()),
+                Set.of(first.jobId(), second.jobId())
             );
 
-            String finalClaimant = postgresRepository
-                .findClaimedBy(jobId)
-                .orElseThrow();
+            Map<String, String> expectedClaimants = Map.of(
+                first.jobId(), first.workerId(),
+                second.jobId(), second.workerId()
+            );
 
-            assertTrue(
-                finalClaimant.equals(firstWorker.id())
-                    || finalClaimant.equals(secondWorker.id())
+            assertEquals(
+                expectedClaimants.get(firstJob.id()),
+                postgresRepository.findClaimedBy(firstJob.id())
+                    .orElseThrow()
+            );
+
+            assertEquals(
+                expectedClaimants.get(secondJob.id()),
+                postgresRepository.findClaimedBy(secondJob.id())
+                    .orElseThrow()
             );
         } finally {
             coordinatedRepository.releaseSelections();
@@ -126,7 +145,7 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
 
         private final AssignmentRepository delegate;
 
-        private final CountDownLatch bothSelectionsCompleted =
+        private final CountDownLatch bothLockedSelections =
             new CountDownLatch(2);
 
         private final CountDownLatch releaseSelections =
@@ -139,21 +158,22 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
         }
 
         @Override
-        public Optional<Job> findNextPending(String capability) {
-            Optional<Job> job = delegate.findNextPending(capability);
+        public Optional<Job> findNextPendingForUpdate(String capability) {
+            Optional<Job> job =
+                delegate.findNextPendingForUpdate(capability);
 
-            bothSelectionsCompleted.countDown();
+            bothLockedSelections.countDown();
 
             try {
                 if (!releaseSelections.await(5, TimeUnit.SECONDS)) {
                     throw new IllegalStateException(
-                        "Timed out waiting to release assignment selections"
+                        "Timed out waiting to release locked assignment selections"
                     );
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException(
-                    "Interrupted while coordinating assignment race",
+                    "Interrupted while coordinating assignment locks",
                     exception
                 );
             }
@@ -179,10 +199,10 @@ class ConcurrentAssignmentRaceTest extends PostgresIntegrationTest {
             return delegate.findClaimedBy(jobId);
         }
 
-        boolean awaitBothSelections(Duration timeout)
+        boolean awaitBothLockedSelections(Duration timeout)
             throws InterruptedException {
 
-            return bothSelectionsCompleted.await(
+            return bothLockedSelections.await(
                 timeout.toMillis(),
                 TimeUnit.MILLISECONDS
             );
