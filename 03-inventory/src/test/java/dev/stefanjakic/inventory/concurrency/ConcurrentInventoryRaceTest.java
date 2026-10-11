@@ -2,6 +2,7 @@ package dev.stefanjakic.inventory.concurrency;
 
 import dev.stefanjakic.inventory.application.InventoryRepository;
 import dev.stefanjakic.inventory.application.InventoryService;
+import dev.stefanjakic.inventory.domain.InsufficientInventoryException;
 import dev.stefanjakic.inventory.domain.InventoryItem;
 import dev.stefanjakic.inventory.infrastructure.persistence.PostgresInventoryRepository;
 import dev.stefanjakic.inventory.support.PostgresIntegrationTest;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -38,7 +40,7 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
     private PostgresInventoryRepository postgresRepository;
 
     @Test
-    void readThenUpdateOversellsWithoutMakingStoredQuantityNegative()
+    void atomicDecrementAllowsOnlyOneConsumerForOneUnit()
         throws Exception {
 
         String sku = "sku-" + UUID.randomUUID();
@@ -48,34 +50,70 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
 
         try {
             var firstAttempt = pool.submit(
-                () -> service.take(sku, 1)
+                () -> attemptTake(sku)
             );
 
             var secondAttempt = pool.submit(
-                () -> service.take(sku, 1)
+                () -> attemptTake(sku)
             );
 
             assertTrue(
-                coordinatedRepository.awaitBothReads(
+                coordinatedRepository.awaitBothAttempts(
                     Duration.ofSeconds(5)
                 ),
-                "Both transactions should read the original stock"
+                "Both consumers should reach the atomic decrement"
             );
 
-            coordinatedRepository.releaseReads();
+            coordinatedRepository.releaseAttempts();
 
-            firstAttempt.get(5, TimeUnit.SECONDS);
-            secondAttempt.get(5, TimeUnit.SECONDS);
+            AttemptResult firstResult =
+                firstAttempt.get(5, TimeUnit.SECONDS);
+            AttemptResult secondResult =
+                secondAttempt.get(5, TimeUnit.SECONDS);
 
-            int storedQuantity = postgresRepository.findBySku(sku)
-                .orElseThrow()
-                .availableQuantity();
+            List<AttemptResult> results = List.of(
+                firstResult,
+                secondResult
+            );
 
-            assertEquals(0, storedQuantity);
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(result -> result == AttemptResult.SUCCESS)
+                    .count()
+            );
+
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(result -> result == AttemptResult.INSUFFICIENT)
+                    .count()
+            );
+
+            assertEquals(
+                0,
+                postgresRepository.findBySku(sku)
+                    .orElseThrow()
+                    .availableQuantity()
+            );
         } finally {
-            coordinatedRepository.releaseReads();
+            coordinatedRepository.releaseAttempts();
             pool.shutdownNow();
         }
+    }
+
+    private AttemptResult attemptTake(String sku) {
+        try {
+            service.take(sku, 1);
+            return AttemptResult.SUCCESS;
+        } catch (InsufficientInventoryException exception) {
+            return AttemptResult.INSUFFICIENT;
+        }
+    }
+
+    private enum AttemptResult {
+        SUCCESS,
+        INSUFFICIENT
     }
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -94,9 +132,9 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
         implements InventoryRepository {
 
         private final InventoryRepository delegate;
-        private final CountDownLatch bothReadsCompleted =
+        private final CountDownLatch bothAttemptsReached =
             new CountDownLatch(2);
-        private final CountDownLatch releaseReads =
+        private final CountDownLatch releaseAttempts =
             new CountDownLatch(1);
 
         CoordinatedInventoryRepository(
@@ -107,14 +145,20 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
 
         @Override
         public Optional<InventoryItem> findBySku(String sku) {
-            Optional<InventoryItem> item = delegate.findBySku(sku);
+            return delegate.findBySku(sku);
+        }
 
-            bothReadsCompleted.countDown();
+        @Override
+        public Optional<InventoryItem> takeIfAvailable(
+            String sku,
+            int quantity
+        ) {
+            bothAttemptsReached.countDown();
 
             try {
-                if (!releaseReads.await(5, TimeUnit.SECONDS)) {
+                if (!releaseAttempts.await(5, TimeUnit.SECONDS)) {
                     throw new IllegalStateException(
-                        "Timed out waiting to release inventory reads"
+                        "Timed out waiting to release inventory attempts"
                     );
                 }
             } catch (InterruptedException exception) {
@@ -125,7 +169,7 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
                 );
             }
 
-            return item;
+            return delegate.takeIfAvailable(sku, quantity);
         }
 
         @Override
@@ -138,17 +182,17 @@ class ConcurrentInventoryRaceTest extends PostgresIntegrationTest {
             delegate.update(item);
         }
 
-        boolean awaitBothReads(Duration timeout)
+        boolean awaitBothAttempts(Duration timeout)
             throws InterruptedException {
 
-            return bothReadsCompleted.await(
+            return bothAttemptsReached.await(
                 timeout.toMillis(),
                 TimeUnit.MILLISECONDS
             );
         }
 
-        void releaseReads() {
-            releaseReads.countDown();
+        void releaseAttempts() {
+            releaseAttempts.countDown();
         }
     }
 }

@@ -33,6 +33,29 @@ public class PostgresInventoryRepository implements InventoryRepository {
     }
 
     @Override
+    public Optional<InventoryItem> takeIfAvailable(
+        String sku,
+        int quantity
+    ) {
+        return jdbcTemplate.query(
+            """
+            UPDATE inventory_item
+            SET available_quantity = available_quantity - ?
+            WHERE sku = ?
+              AND available_quantity >= ?
+            RETURNING sku, available_quantity
+            """,
+            (resultSet, rowNumber) -> new InventoryItem(
+                resultSet.getString("sku"),
+                resultSet.getInt("available_quantity")
+            ),
+            quantity,
+            sku,
+            quantity
+        ).stream().findFirst();
+    }
+
+    @Override
     public void insert(InventoryItem item) {
         jdbcTemplate.update(
             """

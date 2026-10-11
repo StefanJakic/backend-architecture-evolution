@@ -8,6 +8,11 @@ public interface InventoryRepository {
 
     Optional<InventoryItem> findBySku(String sku);
 
+    Optional<InventoryItem> takeIfAvailable(
+        String sku,
+        int quantity
+    );
+
     void insert(InventoryItem item);
 
     void update(InventoryItem item);

@@ -1,5 +1,6 @@
 package dev.stefanjakic.inventory.persistence;
 
+import dev.stefanjakic.inventory.application.InventoryNotFoundException;
 import dev.stefanjakic.inventory.application.InventoryRepository;
 import dev.stefanjakic.inventory.application.InventoryService;
 import dev.stefanjakic.inventory.domain.InsufficientInventoryException;
@@ -28,8 +29,9 @@ class InventoryPersistenceIntegrationTest extends PostgresIntegrationTest {
         String sku = sku();
         repository.insert(new InventoryItem(sku, 5));
 
-        service.take(sku, 3);
+        InventoryItem updated = service.take(sku, 3);
 
+        assertEquals(2, updated.availableQuantity());
         assertEquals(
             2,
             repository.findBySku(sku).orElseThrow().availableQuantity()
@@ -44,6 +46,30 @@ class InventoryPersistenceIntegrationTest extends PostgresIntegrationTest {
         assertThrows(
             InsufficientInventoryException.class,
             () -> service.take(sku, 3)
+        );
+
+        assertEquals(
+            2,
+            repository.findBySku(sku).orElseThrow().availableQuantity()
+        );
+    }
+
+    @Test
+    void takeFromUnknownSkuIsNotFound() {
+        assertThrows(
+            InventoryNotFoundException.class,
+            () -> service.take(sku(), 1)
+        );
+    }
+
+    @Test
+    void takeQuantityMustBePositive() {
+        String sku = sku();
+        repository.insert(new InventoryItem(sku, 2));
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.take(sku, 0)
         );
 
         assertEquals(
