@@ -16,13 +16,16 @@ import java.util.UUID;
 public class ReservationService {
 
     private final ReservationRepository repository;
+    private final ReservationExpiryService expiryService;
     private final Clock clock;
 
     public ReservationService(
         ReservationRepository repository,
+        ReservationExpiryService expiryService,
         Clock clock
     ) {
         this.repository = repository;
+        this.expiryService = expiryService;
         this.clock = clock;
     }
 
@@ -32,7 +35,7 @@ public class ReservationService {
         TimeWindow window
     ) {
         Instant now = clock.instant();
-        repository.expireHolds(now);
+        expiryService.expire(now);
 
         Reservation candidate = new Reservation(
             UUID.randomUUID().toString(),
@@ -59,7 +62,7 @@ public class ReservationService {
         }
 
         Instant now = clock.instant();
-        repository.expireHolds(now);
+        expiryService.expire(now);
 
         Reservation candidate = Reservation.held(
             UUID.randomUUID().toString(),
@@ -77,7 +80,7 @@ public class ReservationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Reservation confirmHold(String reservationId) {
         Instant now = clock.instant();
-        repository.expireHolds(now);
+        expiryService.expire(now);
 
         Reservation reservation = repository.findById(reservationId)
             .orElseThrow(
@@ -90,9 +93,8 @@ public class ReservationService {
         return confirmed;
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public int expireExpiredHolds() {
-        return repository.expireHolds(clock.instant());
+        return expiryService.expire(clock.instant());
     }
 
     private void rejectOverlap(

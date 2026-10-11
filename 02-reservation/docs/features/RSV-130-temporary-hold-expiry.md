@@ -72,10 +72,28 @@ PostgreSQL exclusion constraints support a predicate, which internally creates a
 Before creating a new hold or confirmed reservation:
 
 ~~~text
-UPDATE expired HELD rows -> EXPIRED
-check overlap
-attempt INSERT
+expire stale HELD rows
+    ↓
+COMMIT expiry cleanup
+    ↓
+continue reserve / hold / confirm
 ~~~
+
+Expiry runs in a separate `REQUIRES_NEW` transaction.
+
+That boundary is intentional.
+
+Without it, this flow would be possible:
+
+~~~text
+BEGIN
+mark hold EXPIRED
+confirm request is rejected
+ROLLBACK
+=> row becomes HELD again
+~~~
+
+Expiry is maintenance state that must survive failure of the command that happened to trigger cleanup.
 
 The same expiry operation is exposed separately:
 
