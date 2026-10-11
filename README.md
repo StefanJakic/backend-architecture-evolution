@@ -24,8 +24,8 @@ Requirement
 | --- | --- | --- | --- |
 | 01 | Lifecycle / State Machine | **1.0 COMPLETE** | state, transactions, messaging, operability |
 | 02 | Reservation / Time Window | **1.0 COMPLETE** | overlap, concurrent booking, holds, expiry |
-| 03 | Scarce Resource / Inventory | **NEXT** | quantity, contention, overselling |
-| 04 | Assignment / Matching | Planned | selection and claiming |
+| 03 | Scarce Resource / Inventory | **1.0 COMPLETE** | quantity, contention, overselling |
+| 04 | Assignment / Matching | **NEXT** | selection and claiming |
 | 05 | Behavior / Policy | Planned | behavior variation |
 | 06 | Aggregate / Ownership | Planned | consistency boundaries |
 | 07 | Workflow / Orchestration | Planned | multi-step distributed workflow |
