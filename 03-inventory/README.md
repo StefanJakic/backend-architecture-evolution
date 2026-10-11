@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.2.0-SNAPSHOT - PostgreSQL Read-Check-Update Race**
+**0.3.0-SNAPSHOT - Atomic Conditional Decrement**
 
 This focused skeleton studies quantity contention and overselling.
 
@@ -10,98 +10,123 @@ This focused skeleton studies quantity contention and overselling.
 
 > How do we prevent overselling when many requests try to consume the same limited stock concurrently?
 
-## Core invariant
+## Evolution so far
 
-At the domain level:
+### INV-101 - Quantity model
+
+The local invariant is:
 
 ~~~text
 availableQuantity >= 0
 ~~~
 
-But INV-110 shows that this alone is not enough.
+and a single `InventoryItem` rejects taking more than it owns.
+
+### INV-110 - Lost update
+
+Persistence introduced:
+
+~~~text
+SELECT
+domain take
+UPDATE
+~~~
+
+With one unit:
+
+~~~text
+A reads 1
+B reads 1
+
+A writes 0
+B writes 0
+
+=> both requests succeed
+~~~
+
+The row remains non-negative, but the business history is invalid.
+
+### INV-120 - Atomic conditional decrement
+
+Consumption is now:
+
+~~~sql
+UPDATE inventory_item
+SET available_quantity = available_quantity - ?
+WHERE sku = ?
+  AND available_quantity >= ?
+RETURNING sku, available_quantity
+~~~
+
+So:
+
+~~~text
+stock = 1
+two concurrent take(1)
+
+=> 1 success
+=> 1 insufficient
+=> stock = 0
+~~~
+
+## Key distinction
+
+~~~text
+domain invariant
+    -> what a valid quantity decision means
+
+database mutation
+    -> who wins when many transactions make that decision concurrently
+~~~
+
+For this hot counter, the predicate and mutation belong together.
 
 ## Current architecture
 
 ~~~text
 InventoryService
       |
+      | take()
       v
 InventoryRepository
       |
+      | atomic conditional UPDATE
       v
 PostgreSQL
+      |
+      +-- CHECK available_quantity >= 0
 ~~~
 
-The current write path is deliberately naive:
+Failed atomic take:
 
 ~~~text
-SELECT available
+0 rows returned
     ↓
-InventoryItem.take()
-    ↓
-UPDATE available
+lookup only for error classification
+    ├─ missing SKU
+    └─ insufficient stock
 ~~~
 
-## Sequential behavior
+The lookup does not participate in the allocation decision.
+
+## Why not optimistic/pessimistic locking?
+
+Both can be valid.
+
+For the simple rule:
 
 ~~~text
-available = 5
-take 3
-=> stored = 2
+decrement only if current quantity >= requested quantity
 ~~~
 
-and:
-
-~~~text
-available = 2
-take 3
-=> InsufficientInventoryException
-=> stored = 2
-~~~
-
-## Concurrent bug
-
-With one unit:
-
-~~~text
-Tx A READ -> 1
-Tx B READ -> 1
-
-A take(1) -> valid
-B take(1) -> valid
-
-A UPDATE -> 0
-B UPDATE -> 0
-~~~
-
-Both calls succeed.
-
-Final row:
-
-~~~text
-available = 0
-~~~
-
-The database row is non-negative, but the system accepted two consumers for one unit.
-
-That is overselling through a lost update.
-
-## Important distinction
-
-~~~text
-stored quantity is valid
-!=
-allocation history is valid
-~~~
-
-A `CHECK (available_quantity >= 0)` cannot detect two transactions that both calculate the same zero from the same stale one.
+one conditional SQL statement is smaller and avoids an application-level retry/lock protocol.
 
 ## Evolution
 
 ~~~text
 INV-101  Core quantity model
-INV-110  PostgreSQL read-check-update race   <- current
-INV-120  Atomic conditional decrement
+INV-110  PostgreSQL read-check-update race
+INV-120  Atomic conditional decrement          <- current
 INV-130  High-contention strategy comparison
 1.0      Freeze
 ~~~
@@ -114,12 +139,12 @@ INV-130  High-contention strategy comparison
 
 ## Next pressure
 
-INV-120 will remove the separate read/check/write decision.
-
-PostgreSQL will atomically perform:
+INV-130 will put many concurrent consumers against a small stock and verify the stronger invariant:
 
 ~~~text
-decrement only if enough quantity still exists
+number of successful takes
+=
+initial stock - final stock
 ~~~
 
-so one unit can produce only one successful take.
+Then we will compare where atomic SQL, optimistic locking, and pessimistic locking fit rather than adding all three implementations just for pattern coverage.
