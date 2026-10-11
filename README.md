@@ -17,6 +17,23 @@ Requirement
   -> Versioned release
 ```
 
+
+## Skeleton progress
+
+| # | Skeleton | Status | Dominant pressure |
+| --- | --- | --- | --- |
+| 01 | Lifecycle / State Machine | **1.0 COMPLETE** | state, transactions, messaging, operability |
+| 02 | Reservation / Time Window | **1.0 COMPLETE** | overlap, concurrent booking, holds, expiry |
+| 03 | Scarce Resource / Inventory | **NEXT** | quantity, contention, overselling |
+| 04 | Assignment / Matching | Planned | selection and claiming |
+| 05 | Behavior / Policy | Planned | behavior variation |
+| 06 | Aggregate / Ownership | Planned | consistency boundaries |
+| 07 | Workflow / Orchestration | Planned | multi-step distributed workflow |
+| 08 | External Boundary / Adapter | Planned | unreliable dependencies |
+| 09 | Event / Reaction | Planned | event-driven reaction |
+| 10 | Hierarchy / Tree | Planned | recursive structure |
+| 11 | Rule / Validation Pipeline | Planned | composable business rules |
+
 ## Planned architecture families
 
 1. Lifecycle / State Machine
