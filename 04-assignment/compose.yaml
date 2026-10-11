@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: assignment
+      POSTGRES_USER: assignment
+      POSTGRES_PASSWORD: assignment
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assignment -d assignment"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - assignment-postgres:/var/lib/postgresql/data
+
+volumes:
+  assignment-postgres:
