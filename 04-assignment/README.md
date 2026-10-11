@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.2.0-SNAPSHOT - PostgreSQL Select-Then-Claim Race**
+**0.3.0-SNAPSHOT - Lock-Aware Selection with SKIP LOCKED**
 
 This focused skeleton studies selection and exclusive claiming.
 
@@ -10,9 +10,9 @@ This focused skeleton studies selection and exclusive claiming.
 
 > When several pieces of work are eligible, how do we select and claim exactly one without duplicate assignment?
 
-## 1. Deterministic local selection
+## Evolution so far
 
-ASG-101 established:
+### ASG-101 - Deterministic selection
 
 ~~~text
 eligible jobs only
@@ -24,84 +24,100 @@ stable ID tie-breaker
 
 This makes local choice reproducible.
 
-## 2. Persistence introduces ownership
+### ASG-110 - Select-then-claim race
 
-Jobs now live in PostgreSQL:
+The naive persistence flow:
 
 ~~~text
-PENDING
+SELECT next PENDING
     ↓
-CLAIMED(worker)
+UPDATE later
 ~~~
 
-Current service flow is deliberately naive:
+allowed two schedulers to select the same job and both return successful ownership.
+
+### ASG-120 - Lock-aware candidate selection
+
+Selection now uses:
+
+~~~sql
+SELECT id, required_capability, priority
+FROM assignment_job
+WHERE status = 'PENDING'
+  AND required_capability = ?
+ORDER BY priority DESC, id ASC
+LIMIT 1
+FOR UPDATE SKIP LOCKED
+~~~
+
+The selected row remains locked until the same transaction records the claim and commits.
+
+## Concurrent result
+
+With two eligible jobs:
 
 ~~~text
-SELECT next PENDING job
-    ↓
-application receives candidate
-    ↓
-UPDATE job as CLAIMED
+Job-1 priority 100
+Job-2 priority 90
 ~~~
 
-## 3. Concurrent bug
-
-With one pending job:
+and two schedulers:
 
 ~~~text
-Scheduler A SELECT -> Job-1
-Scheduler B SELECT -> Job-1
+A locks Job-1
+B skips Job-1
+B locks Job-2
 
-A claims for Worker-A
-B claims for Worker-B
+A -> Assignment(Job-1, Worker-A)
+B -> Assignment(Job-2, Worker-B)
 ~~~
 
-Both service calls succeed:
-
-~~~text
-Assignment(Job-1, Worker-A)
-Assignment(Job-1, Worker-B)
-~~~
-
-The final row contains only one claimant because the last update wins.
-
-That does not undo the fact that two workers were already told they owned the same job.
+The exact worker/job pairing may vary by scheduling, but the job IDs must be different.
 
 ## Key lesson
 
 ~~~text
-deterministic selection
-!=
-exclusive claiming
+selection
++
+transactional row lock
++
+claim before commit
+=
+exclusive ownership
 ~~~
 
-and:
+## Why SKIP LOCKED?
+
+It avoids unnecessary waiting when another eligible candidate exists.
 
 ~~~text
-valid final row
-!=
-valid claim history
+best row locked?
+    -> skip it
+    -> try next eligible row
 ~~~
 
-## Why this differs from inventory
+That is useful for queue-like claiming.
 
-Inventory had one known counter:
+## Contrast with inventory
 
 ~~~text
-UPDATE quantity
-WHERE quantity >= requested
+03 inventory:
+known hot counter
+-> atomic conditional UPDATE
+
+04 assignment:
+select one candidate from a set
+-> FOR UPDATE SKIP LOCKED
 ~~~
 
-Assignment must choose from a **set of eligible candidate rows**.
-
-That makes row-lock-aware selection a natural next tool.
+Different invariant shape, different concurrency mechanism.
 
 ## Evolution
 
 ~~~text
 ASG-101  Eligibility + deterministic selection
-ASG-110  PostgreSQL select-then-claim race    <- current
-ASG-120  SELECT FOR UPDATE SKIP LOCKED
+ASG-110  PostgreSQL select-then-claim race
+ASG-120  SELECT FOR UPDATE SKIP LOCKED          <- current
 ASG-130  Multi-worker claiming / fairness notes
 1.0      Freeze
 ~~~
@@ -114,10 +130,4 @@ ASG-130  Multi-worker claiming / fairness notes
 
 ## Next pressure
 
-ASG-120 will select the next pending job using:
-
-~~~sql
-FOR UPDATE SKIP LOCKED
-~~~
-
-so a scheduler does not select a candidate row already being claimed by another transaction.
+ASG-130 will run several workers against several pending jobs and verify that claimed job IDs stay unique while discussing ordering and fairness under concurrent SKIP LOCKED workers.

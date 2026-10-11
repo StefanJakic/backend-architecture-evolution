@@ -6,7 +6,7 @@ import java.util.Optional;
 
 public interface AssignmentRepository {
 
-    Optional<Job> findNextPending(String capability);
+    Optional<Job> findNextPendingForUpdate(String capability);
 
     void insert(Job job);
 

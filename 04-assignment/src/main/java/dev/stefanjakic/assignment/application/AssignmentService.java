@@ -17,7 +17,7 @@ public class AssignmentService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Assignment claimNext(Worker worker) {
-        Job selected = repository.findNextPending(
+        Job selected = repository.findNextPendingForUpdate(
             worker.capability()
         ).orElseThrow(
             () -> new NoAssignableJobException(worker.capability())

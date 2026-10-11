@@ -20,7 +20,7 @@ public class PostgresAssignmentRepository
     }
 
     @Override
-    public Optional<Job> findNextPending(String capability) {
+    public Optional<Job> findNextPendingForUpdate(String capability) {
         return jdbcTemplate.query(
             """
             SELECT id, required_capability, priority
@@ -29,6 +29,7 @@ public class PostgresAssignmentRepository
               AND required_capability = ?
             ORDER BY priority DESC, id ASC
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             """,
             (resultSet, rowNumber) -> new Job(
                 resultSet.getString("id"),
@@ -63,16 +64,23 @@ public class PostgresAssignmentRepository
         String jobId,
         String workerId
     ) {
-        jdbcTemplate.update(
+        int updated = jdbcTemplate.update(
             """
             UPDATE assignment_job
             SET status = 'CLAIMED',
                 claimed_by = ?
             WHERE id = ?
+              AND status = 'PENDING'
             """,
             workerId,
             jobId
         );
+
+        if (updated != 1) {
+            throw new IllegalStateException(
+                "Locked job was not claimable: " + jobId
+            );
+        }
     }
 
     @Override
