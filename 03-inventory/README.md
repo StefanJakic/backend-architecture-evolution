@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.3.0-SNAPSHOT - Atomic Conditional Decrement**
+**0.4.0-SNAPSHOT - High-Contention Verification**
 
 This focused skeleton studies quantity contention and overselling.
 
@@ -10,45 +10,55 @@ This focused skeleton studies quantity contention and overselling.
 
 > How do we prevent overselling when many requests try to consume the same limited stock concurrently?
 
-## Evolution so far
+## Learning path
 
-### INV-101 - Quantity model
+~~~text
+INV-101  Quantity invariant
+    ↓
+INV-110  Lost update / overselling
+    ↓
+INV-120  Atomic conditional decrement
+    ↓
+INV-130  High-contention verification
+~~~
 
-The local invariant is:
+## 1. Local quantity rule
 
 ~~~text
 availableQuantity >= 0
 ~~~
 
-and a single `InventoryItem` rejects taking more than it owns.
+A single domain object rejects taking more stock than it owns.
 
-### INV-110 - Lost update
+## 2. Why that is not enough
 
-Persistence introduced:
+The original persistence flow:
 
 ~~~text
 SELECT
-domain take
-UPDATE
+take in Java
+UPDATE absolute quantity
 ~~~
 
-With one unit:
+allowed:
 
 ~~~text
+stock = 1
+
 A reads 1
 B reads 1
 
-A writes 0
-B writes 0
+A succeeds
+B succeeds
 
-=> both requests succeed
+both write 0
 ~~~
 
-The row remains non-negative, but the business history is invalid.
+The row looked valid while the business outcome oversold.
 
-### INV-120 - Atomic conditional decrement
+## 3. Atomic decrement
 
-Consumption is now:
+Consumption now uses:
 
 ~~~sql
 UPDATE inventory_item
@@ -58,76 +68,97 @@ WHERE sku = ?
 RETURNING sku, available_quantity
 ~~~
 
-So:
+The database performs the admission check and mutation together.
+
+## 4. High contention
+
+The final concurrency scenario uses:
 
 ~~~text
-stock = 1
-two concurrent take(1)
-
-=> 1 success
-=> 1 insufficient
-=> stock = 0
+stock = 10
+50 concurrent consumers
+each wants 1
 ~~~
 
-## Key distinction
+Required result:
 
 ~~~text
-domain invariant
-    -> what a valid quantity decision means
-
-database mutation
-    -> who wins when many transactions make that decision concurrently
+10 SUCCESS
+40 INSUFFICIENT
+final stock = 0
 ~~~
 
-For this hot counter, the predicate and mutation belong together.
+And the stronger invariant:
+
+~~~text
+successful takes
+=
+initial stock - final stock
+~~~
+
+## Important lesson
+
+Atomic SQL does not eliminate contention.
+
+All requests for one SKU still compete for the same database row.
+
+What it eliminates is the stale read/check/write protocol for this simple invariant.
+
+## Strategy selection
+
+~~~text
+simple numeric invariant
+    -> atomic conditional UPDATE
+
+richer aggregate + rare conflicts
+    -> optimistic locking
+
+multi-step locked decision
+    -> pessimistic locking / SELECT FOR UPDATE
+~~~
+
+The goal is not to implement every pattern.
+
+The goal is to choose the smallest mechanism that correctly protects the invariant.
 
 ## Current architecture
 
 ~~~text
 InventoryService
       |
-      | take()
       v
 InventoryRepository
       |
-      | atomic conditional UPDATE
+      | takeIfAvailable()
       v
 PostgreSQL
       |
+      +-- atomic conditional decrement
       +-- CHECK available_quantity >= 0
 ~~~
 
-Failed atomic take:
+## Deliberate omissions
 
-~~~text
-0 rows returned
-    ↓
-lookup only for error classification
-    ├─ missing SKU
-    └─ insufficient stock
-~~~
+No:
 
-The lookup does not participate in the allocation decision.
+- HTTP
+- Kafka
+- Redis
+- inventory reservation lifecycle
+- warehouse model
+- Kubernetes
+- AWS
+- benchmarking claims
 
-## Why not optimistic/pessimistic locking?
-
-Both can be valid.
-
-For the simple rule:
-
-~~~text
-decrement only if current quantity >= requested quantity
-~~~
-
-one conditional SQL statement is smaller and avoids an application-level retry/lock protocol.
+Those are different pressures.
 
 ## Evolution
 
 ~~~text
 INV-101  Core quantity model
 INV-110  PostgreSQL read-check-update race
-INV-120  Atomic conditional decrement          <- current
-INV-130  High-contention strategy comparison
+INV-120  Atomic conditional decrement
+INV-130  High-contention verification       <- current
 1.0      Freeze
 ~~~
 
@@ -137,14 +168,4 @@ INV-130  High-contention strategy comparison
 ./gradlew test
 ~~~
 
-## Next pressure
-
-INV-130 will put many concurrent consumers against a small stock and verify the stronger invariant:
-
-~~~text
-number of successful takes
-=
-initial stock - final stock
-~~~
-
-Then we will compare where atomic SQL, optimistic locking, and pessimistic locking fit rather than adding all three implementations just for pattern coverage.
+After this feature is verified, only the **1.0 freeze** remains.
