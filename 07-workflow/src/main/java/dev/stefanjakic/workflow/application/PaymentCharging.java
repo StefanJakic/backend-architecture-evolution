@@ -4,7 +4,8 @@ public interface PaymentCharging {
 
     String charge(
         String orderId,
-        long amountCents
+        long amountCents,
+        String operationKey
     );
 
     void refund(String paymentId);
