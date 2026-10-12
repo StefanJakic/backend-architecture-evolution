@@ -16,7 +16,10 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -135,6 +138,173 @@ class FulfillmentResumeIntegrationTest
         );
     }
 
+
+    @Test
+    void replaysPaymentSafelyWhenCrashHappensBeforePaymentCheckpoint() {
+        String orderId =
+            "order-" + UUID.randomUUID();
+
+        var inventory = new CountingInventory();
+        var payment = new CountingPayment();
+        var shipping = new CountingShipping();
+
+        var crashingRepository =
+            new CrashBeforePaymentCheckpointRepository(
+                repository
+            );
+
+        var firstProcess = new FulfillmentWorkflow(
+            inventory,
+            payment,
+            shipping,
+            crashingRepository
+        );
+
+        assertThrows(
+            SimulatedProcessCrash.class,
+            () -> firstProcess.fulfill(
+                new FulfillmentCommand(
+                    orderId,
+                    10_000
+                )
+            )
+        );
+
+        assertEquals(
+            FulfillmentPhase.INVENTORY_RESERVED,
+            repository.findByOrderId(orderId)
+                .orElseThrow()
+                .phase()
+        );
+
+        assertEquals(
+            1,
+            payment.chargeCalls.get()
+        );
+
+        assertEquals(
+            1,
+            payment.logicalChargeCalls.get()
+        );
+
+        var restartedProcess = new FulfillmentWorkflow(
+            inventory,
+            payment,
+            shipping,
+            repository
+        );
+
+        var result = restartedProcess.resume(orderId);
+
+        assertEquals(
+            "payment-" + orderId,
+            result.paymentId()
+        );
+
+        assertEquals(
+            2,
+            payment.chargeCalls.get(),
+            "Payment boundary can receive the same request twice"
+        );
+
+        assertEquals(
+            1,
+            payment.logicalChargeCalls.get(),
+            "Stable operation key must prevent a second logical charge"
+        );
+
+        assertEquals(
+            Set.of(orderId + ":charge"),
+            payment.resultsByOperationKey.keySet()
+        );
+
+        assertEquals(
+            1,
+            inventory.reserveCalls.get(),
+            "Persisted inventory checkpoint must skip reservation replay"
+        );
+
+        assertEquals(
+            1,
+            shipping.createCalls.get()
+        );
+
+        assertEquals(
+            FulfillmentPhase.COMPLETED,
+            repository.findByOrderId(orderId)
+                .orElseThrow()
+                .phase()
+        );
+    }
+
+    static final class CrashBeforePaymentCheckpointRepository
+        implements FulfillmentStateRepository {
+
+        private final FulfillmentStateRepository delegate;
+
+        CrashBeforePaymentCheckpointRepository(
+            FulfillmentStateRepository delegate
+        ) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void createIfAbsent(
+            FulfillmentCommand command
+        ) {
+            delegate.createIfAbsent(command);
+        }
+
+        @Override
+        public Optional<dev.stefanjakic.workflow.domain.FulfillmentState>
+            findByOrderId(String orderId) {
+
+            return delegate.findByOrderId(orderId);
+        }
+
+        @Override
+        public void markInventoryReserved(
+            String orderId,
+            String reservationId
+        ) {
+            delegate.markInventoryReserved(
+                orderId,
+                reservationId
+            );
+        }
+
+        @Override
+        public void markPaymentCharged(
+            String orderId,
+            String paymentId
+        ) {
+            throw new SimulatedProcessCrash();
+        }
+
+        @Override
+        public void markCompleted(
+            String orderId,
+            String shipmentId
+        ) {
+            delegate.markCompleted(
+                orderId,
+                shipmentId
+            );
+        }
+
+        @Override
+        public void markCompensated(String orderId) {
+            delegate.markCompensated(orderId);
+        }
+
+        @Override
+        public void markCompensationFailed(
+            String orderId
+        ) {
+            delegate.markCompensationFailed(orderId);
+        }
+    }
+
     static final class CrashAfterPaymentCheckpointRepository
         implements FulfillmentStateRepository {
 
@@ -215,7 +385,10 @@ class FulfillmentResumeIntegrationTest
             new AtomicInteger();
 
         @Override
-        public String reserve(String orderId) {
+        public String reserve(
+            String orderId,
+            String operationKey
+        ) {
             reserveCalls.incrementAndGet();
             return "reservation-" + orderId;
         }
@@ -231,13 +404,27 @@ class FulfillmentResumeIntegrationTest
         private final AtomicInteger chargeCalls =
             new AtomicInteger();
 
+        private final AtomicInteger logicalChargeCalls =
+            new AtomicInteger();
+
+        private final Map<String, String> resultsByOperationKey =
+            new HashMap<>();
+
         @Override
-        public String charge(
+        public synchronized String charge(
             String orderId,
-            long amountCents
+            long amountCents,
+            String operationKey
         ) {
             chargeCalls.incrementAndGet();
-            return "payment-" + orderId;
+
+            return resultsByOperationKey.computeIfAbsent(
+                operationKey,
+                ignored -> {
+                    logicalChargeCalls.incrementAndGet();
+                    return "payment-" + orderId;
+                }
+            );
         }
 
         @Override
@@ -255,7 +442,8 @@ class FulfillmentResumeIntegrationTest
         public String createShipment(
             String orderId,
             String reservationId,
-            String paymentId
+            String paymentId,
+            String operationKey
         ) {
             createCalls.incrementAndGet();
             return "shipment-" + orderId;
@@ -273,7 +461,10 @@ class FulfillmentResumeIntegrationTest
         InventoryReservation inventoryReservation() {
             return new InventoryReservation() {
                 @Override
-                public String reserve(String orderId) {
+                public String reserve(
+            String orderId,
+            String operationKey
+        ) {
                     return "unused-reservation";
                 }
 
@@ -289,7 +480,8 @@ class FulfillmentResumeIntegrationTest
                 @Override
                 public String charge(
                     String orderId,
-                    long amountCents
+                    long amountCents,
+                    String operationKey
                 ) {
                     return "unused-payment";
                 }
@@ -305,7 +497,8 @@ class FulfillmentResumeIntegrationTest
             return (
                 orderId,
                 reservationId,
-                paymentId
+                paymentId,
+                operationKey
             ) -> "unused-shipment";
         }
     }
