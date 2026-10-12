@@ -1,21 +1,32 @@
 # 06 - Aggregate / Ownership
 
-## Status
+**Status: COMPLETE / FROZEN**
 
-**0.3.0-SNAPSHOT - Root-Level Optimistic Versioning**
+**Version: 1.0.0**
 
-This focused skeleton studies consistency and ownership boundaries.
-
-## Dominant question
+This focused skeleton studies one dominant architecture question:
 
 > Which objects must change together to protect one business invariant, and where should the consistency boundary live?
 
-## Domain
+## Final learning path
+
+~~~text
+AGG-101  root owns child mutation + invariant
+    ↓
+AGG-110  persistence follows the aggregate boundary
+    ↓
+AGG-120  concurrent stale snapshots + optimistic root version
+    ↓
+1.0      Freeze
+~~~
+
+## 1. Aggregate starts from an invariant
+
+Domain:
 
 ~~~text
 Project
   totalBudget
-  version
   allocations[]
 ~~~
 
@@ -27,18 +38,63 @@ sum(allocation.amount)
 project.totalBudget
 ~~~
 
-## AGG-101 - Root owns child mutation
+A single BudgetAllocation cannot decide whether it is valid in isolation.
 
-The root is the only entry point for allocation changes.
+The rule depends on the root and all existing children.
+
+Therefore Project is the consistency owner.
+
+## 2. Root owns child mutation
+
+External code asks:
 
 ~~~text
-outside world
-    |
-    v
-Project.addAllocation(...)
+project.addAllocation(...)
 ~~~
 
-## AGG-110 - Persistence follows the aggregate
+rather than mutating children directly.
+
+The aggregate root:
+
+- rejects duplicate allocation IDs
+- checks remaining budget
+- mutates the child collection only after validation
+- exposes children as a read-only snapshot
+
+BudgetAllocation is immutable.
+
+This prevents callers from changing state behind the root's back.
+
+## 3. Object graph is not enough
+
+~~~text
+object containment
+!=
+aggregate boundary
+~~~
+
+The boundary exists because state must be valid together after one business operation.
+
+For this module:
+
+~~~text
+Project
++
+all BudgetAllocations
+=
+one consistency boundary
+~~~
+
+## 4. Persistence follows the aggregate
+
+Storage uses two relational tables:
+
+~~~text
+project
+budget_allocation
+~~~
+
+but the application exposes only:
 
 ~~~text
 ProjectRepository
@@ -48,13 +104,43 @@ ProjectRepository
     +-- save(Project)
 ~~~
 
-There is no independent BudgetAllocationRepository.
+There is deliberately no BudgetAllocationRepository.
 
-Multiple relational tables still represent one domain consistency boundary.
+Multiple tables do not imply multiple independently mutable domain roots.
 
-## AGG-120 - Concurrent snapshots need root-level versioning
+## 5. Load, mutate, save is one application transaction
 
-Before versioning:
+~~~text
+BEGIN
+
+load Project aggregate
+    ↓
+project.addAllocation(...)
+    ↓
+save Project aggregate
+
+COMMIT
+~~~
+
+The service transaction coordinates the use case.
+
+The domain root still owns the business invariant.
+
+## 6. Rehydration does not bypass the domain
+
+The repository reconstructs persisted child state through:
+
+~~~text
+Project.restore(...)
+    ↓
+Project.addAllocation(...)
+~~~
+
+Persistence does not get a special back door into invalid domain state.
+
+## 7. Concurrent snapshots create a different problem
+
+Even with a correct in-memory invariant, two transactions can load the same valid aggregate version:
 
 ~~~text
 Tx A loads Project v0
@@ -62,50 +148,62 @@ Tx B loads Project v0
 
 A adds Allocation-A
 B adds Allocation-B
+~~~
 
+Both mutations may be locally valid.
+
+Without concurrency control:
+
+~~~text
 A saves
 B saves later
 ~~~
 
-Both calls could succeed while one child change disappeared.
+and the later whole-aggregate snapshot can overwrite the earlier one.
 
-That is a whole-aggregate lost update.
+The final aggregate may still satisfy the budget invariant while one successful business change has disappeared.
 
-## Optimistic root save
+That is a lost update at the aggregate level.
 
-Save now begins with:
+## 8. Root-level optimistic versioning
+
+Project carries:
+
+~~~text
+version
+~~~
+
+Save begins with:
 
 ~~~sql
 UPDATE project
-SET version = version + 1
+SET total_budget_cents = ?,
+    version = version + 1
 WHERE id = ?
   AND version = ?
 ~~~
 
-With two transactions loaded from version 0:
+If:
 
 ~~~text
-exactly 1 SUCCESS
-exactly 1 CONFLICT
+updated rows = 1
 ~~~
 
-Final persisted state:
+the transaction owns the next aggregate version and may replace child state.
+
+If:
 
 ~~~text
-initial allocation
-+
-winner allocation
-+
-version = 1
+updated rows = 0
 ~~~
 
-The stale transaction fails before replacing child rows.
+the snapshot is stale and the repository throws an optimistic conflict before touching child rows.
 
-## Why version the root?
+## 9. Why version the root?
 
-The competing transactions may add different children.
+Concurrent transactions may add different children.
 
-They still conflict because both computed new aggregate state from the same prior snapshot.
+They still conflict because both computed a new aggregate state from the same prior root snapshot.
 
 Therefore:
 
@@ -120,24 +218,86 @@ not:
 one version per child
 ~~~
 
-## Current lesson
+The root version logically protects:
+
+~~~text
+Project fields
++
+all BudgetAllocation children
+=
+one persisted aggregate snapshot
+~~~
+
+## 10. Two different kinds of protection
+
+These solve different problems:
 
 ~~~text
 domain invariant
--> protects mutation inside one loaded aggregate
+-> protects one in-memory mutation
 
 optimistic root version
 -> protects against stale concurrent aggregate saves
 ~~~
 
-## Evolution
+Both matter.
+
+A correct aggregate model without concurrency protection can still lose updates.
+
+A version column without a proper domain owner can still persist invalid business state.
+
+## Final architecture
 
 ~~~text
-AGG-101  root owns child mutation + invariant
-AGG-110  persist aggregate as one consistency boundary
-AGG-120  concurrent updates + optimistic version      <- current
-1.0      Freeze
+ProjectBudgetService
+        |
+        | transaction
+        v
+ProjectRepository
+        |
+        | load/save aggregate
+        v
+Project
+  |
+  +-- invariant owner
+  +-- version
+  +-- BudgetAllocation children
+        |
+        v
+PostgreSQL
+  project
+  budget_allocation
 ~~~
+
+## What this skeleton teaches
+
+- aggregate root as mutation entry point
+- invariants spanning root + children
+- immutable child state
+- consistency boundary vs object containment
+- repository boundary aligned with aggregate boundary
+- relational tables vs domain ownership
+- aggregate rehydration
+- load-modify-save transaction shape
+- whole-aggregate lost updates
+- optimistic concurrency control
+- root-level version semantics
+- stale snapshot conflict detection
+
+## Deliberately not included
+
+This module does not add:
+
+- child repositories
+- pessimistic locking
+- automatic retries
+- Kafka/events
+- sagas
+- distributed transactions
+- leases
+- generic repository abstractions
+
+Those are different architecture pressures.
 
 ## Run
 
@@ -145,6 +305,16 @@ AGG-120  concurrent updates + optimistic version      <- current
 ./gradlew test
 ~~~
 
+## Freeze rule
+
+This module is intentionally closed at **1.0.0**.
+
+A new dominant pressure belongs in a new skeleton.
+
 ## Next
 
-After verification, 06-aggregate is ready for **1.0 COMPLETE / FROZEN**.
+**07 - Workflow / Orchestration**
+
+Dominant question:
+
+> When one business operation spans multiple steps and dependencies, who owns the workflow state, failure handling, and compensation?
