@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.1.0-SNAPSHOT - Explicit Workflow Ownership**
+**0.2.0-SNAPSHOT - Explicit Compensation**
 
 This focused skeleton studies multi-step business operations, partial failure, compensation, and resumability.
 
@@ -10,7 +10,7 @@ This focused skeleton studies multi-step business operations, partial failure, c
 
 > When one business operation spans several independent steps, who owns sequencing, failure handling, and recovery?
 
-## Current workflow
+## Forward workflow
 
 ~~~text
 reserve inventory
@@ -20,7 +20,7 @@ charge payment
 create shipment
 ~~~
 
-## Current design
+## WFL-101 - One owner of forward progress
 
 ~~~text
 FulfillmentWorkflow
@@ -30,71 +30,96 @@ FulfillmentWorkflow
     +-- ShipmentCreation
 ~~~
 
-Each capability owns its local operation.
+The workflow decides what happens next.
 
-`FulfillmentWorkflow` owns the order.
+A step owns only how its own capability works.
 
-## Happy path
+## WFL-110 - Completed side effects need compensation
+
+Forward and inverse operations:
+
+~~~text
+reserve <-> release
+charge  <-> refund
+~~~
+
+Failure after payment:
 
 ~~~text
 reserve
-→ charge
-→ ship
-→ FulfillmentResult
+charge
+ship -> FAIL
+    ↓
+refund
+release
 ~~~
 
-The result contains the IDs returned by each step.
+Compensation runs in reverse order of completed side effects.
 
-## Failure behavior
-
-Forward execution stops immediately on failure.
+## Failure matrix
 
 ~~~text
-inventory fails
--> payment not called
--> shipment not called
+reserve fails
+-> no compensation
+
+charge fails
+-> release inventory
+
+shipment fails
+-> refund payment
+-> release inventory
 ~~~
 
-and:
+## Compensation failure
+
+The original forward failure remains the primary exception.
+
+Compensation failures are preserved as suppressed exceptions.
+
+Example:
 
 ~~~text
-payment fails
--> shipment not called
+shipment FAIL
+refund FAIL
+release FAIL
+
+primary:
+shipment failure
+
+suppressed:
+refund failure
+release failure
 ~~~
 
-## Current limitation
-
-If inventory reservation succeeds and payment later fails:
-
-~~~text
-reservation still exists
-~~~
-
-The orchestrator can stop future work, but it cannot magically roll back an already completed remote/local side effect.
-
-That distinction creates the next pressure.
+Remaining compensations are still attempted after one compensation fails.
 
 ## Key lesson
 
 ~~~text
-step implementation
+exception propagation
 !=
-workflow ownership
+distributed rollback
 ~~~
 
 and:
 
 ~~~text
-stop forward progress
-!=
-compensate completed work
+compensation
+=
+explicit inverse business action
 ~~~
 
-## Planned evolution
+## Current limitation
+
+The workflow knows what completed only while the process is alive.
+
+A crash can erase that knowledge.
+
+## Evolution
 
 ~~~text
-WFL-101  explicit orchestrator owns step order        <- current
-WFL-110  partial failure + compensation
+WFL-101  explicit orchestrator owns step order
+WFL-110  partial failure + compensation             <- current
 WFL-120  persist workflow state / resume after crash
 WFL-130  idempotent retry boundary
 1.0      Freeze
@@ -108,4 +133,4 @@ WFL-130  idempotent retry boundary
 
 ## Next pressure
 
-WFL-110 will add compensation in reverse order of completed side effects.
+WFL-120 will make completed-step state durable so a restarted process can decide whether to continue forward or compensate.

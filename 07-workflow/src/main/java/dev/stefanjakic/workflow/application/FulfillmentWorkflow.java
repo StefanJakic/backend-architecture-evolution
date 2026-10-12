@@ -45,23 +45,68 @@ public final class FulfillmentWorkflow {
                 command.orderId()
             );
 
-        String paymentId =
-            paymentCharging.charge(
+        String paymentId;
+
+        try {
+            paymentId = paymentCharging.charge(
                 command.orderId(),
                 command.amountCents()
             );
-
-        String shipmentId =
-            shipmentCreation.createShipment(
-                command.orderId(),
-                reservationId,
-                paymentId
+        } catch (RuntimeException failure) {
+            compensate(
+                failure,
+                () -> inventoryReservation.release(
+                    reservationId
+                )
             );
+
+            throw failure;
+        }
+
+        String shipmentId;
+
+        try {
+            shipmentId =
+                shipmentCreation.createShipment(
+                    command.orderId(),
+                    reservationId,
+                    paymentId
+                );
+        } catch (RuntimeException failure) {
+            compensate(
+                failure,
+                () -> paymentCharging.refund(
+                    paymentId
+                )
+            );
+
+            compensate(
+                failure,
+                () -> inventoryReservation.release(
+                    reservationId
+                )
+            );
+
+            throw failure;
+        }
 
         return new FulfillmentResult(
             reservationId,
             paymentId,
             shipmentId
         );
+    }
+
+    private void compensate(
+        RuntimeException originalFailure,
+        Runnable compensation
+    ) {
+        try {
+            compensation.run();
+        } catch (RuntimeException compensationFailure) {
+            originalFailure.addSuppressed(
+                compensationFailure
+            );
+        }
     }
 }
