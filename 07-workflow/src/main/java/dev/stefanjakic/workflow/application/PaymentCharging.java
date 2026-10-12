@@ -6,4 +6,6 @@ public interface PaymentCharging {
         String orderId,
         long amountCents
     );
+
+    void refund(String paymentId);
 }
