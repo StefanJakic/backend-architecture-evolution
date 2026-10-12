@@ -92,7 +92,11 @@ public class FulfillmentWorkflow {
     ) {
         String reservationId =
             inventoryReservation.reserve(
-                state.orderId()
+                state.orderId(),
+                operationKey(
+                    state.orderId(),
+                    "reserve"
+                )
             );
 
         stateRepository.markInventoryReserved(
@@ -109,7 +113,11 @@ public class FulfillmentWorkflow {
         try {
             paymentId = paymentCharging.charge(
                 state.orderId(),
-                state.amountCents()
+                state.amountCents(),
+                operationKey(
+                    state.orderId(),
+                    "charge"
+                )
             );
         } catch (RuntimeException failure) {
             compensateReservation(
@@ -135,7 +143,11 @@ public class FulfillmentWorkflow {
                 shipmentCreation.createShipment(
                     state.orderId(),
                     state.reservationId(),
-                    state.paymentId()
+                    state.paymentId(),
+                    operationKey(
+                        state.orderId(),
+                        "shipment"
+                    )
                 );
         } catch (RuntimeException failure) {
             compensatePaymentAndReservation(
@@ -236,6 +248,13 @@ public class FulfillmentWorkflow {
             );
             return false;
         }
+    }
+
+    private String operationKey(
+        String orderId,
+        String operation
+    ) {
+        return orderId + ":" + operation;
     }
 
     private FulfillmentState load(String orderId) {

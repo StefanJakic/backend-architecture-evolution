@@ -5,6 +5,7 @@ public interface ShipmentCreation {
     String createShipment(
         String orderId,
         String reservationId,
-        String paymentId
+        String paymentId,
+        String operationKey
     );
 }

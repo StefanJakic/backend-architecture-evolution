@@ -26,7 +26,10 @@ class FulfillmentWorkflowTest {
         InventoryReservation inventory =
             new InventoryReservation() {
                 @Override
-                public String reserve(String orderId) {
+                public String reserve(
+                    String orderId,
+                    String operationKey
+                ) {
                     calls.add("reserve");
                     return "reservation-1";
                 }
@@ -42,7 +45,8 @@ class FulfillmentWorkflowTest {
                 @Override
                 public String charge(
                     String orderId,
-                    long amountCents
+                    long amountCents,
+                    String operationKey
                 ) {
                     calls.add("charge");
                     return "payment-1";
@@ -55,7 +59,7 @@ class FulfillmentWorkflowTest {
             };
 
         ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
+            (orderId, reservationId, paymentId, operationKey) -> {
                 calls.add("ship");
                 return "shipment-1";
             };
@@ -104,7 +108,10 @@ class FulfillmentWorkflowTest {
         InventoryReservation inventory =
             new InventoryReservation() {
                 @Override
-                public String reserve(String orderId) {
+                public String reserve(
+                    String orderId,
+                    String operationKey
+                ) {
                     calls.add("reserve");
                     return "reservation-1";
                 }
@@ -120,7 +127,8 @@ class FulfillmentWorkflowTest {
                 @Override
                 public String charge(
                     String orderId,
-                    long amountCents
+                    long amountCents,
+                    String operationKey
                 ) {
                     calls.add("charge");
                     throw new IllegalStateException(
@@ -135,7 +143,7 @@ class FulfillmentWorkflowTest {
             };
 
         ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
+            (orderId, reservationId, paymentId, operationKey) -> {
                 calls.add("ship");
                 return "shipment-1";
             };
@@ -183,7 +191,10 @@ class FulfillmentWorkflowTest {
         InventoryReservation inventory =
             new InventoryReservation() {
                 @Override
-                public String reserve(String orderId) {
+                public String reserve(
+                    String orderId,
+                    String operationKey
+                ) {
                     calls.add("reserve");
                     return "reservation-1";
                 }
@@ -199,7 +210,8 @@ class FulfillmentWorkflowTest {
                 @Override
                 public String charge(
                     String orderId,
-                    long amountCents
+                    long amountCents,
+                    String operationKey
                 ) {
                     calls.add("charge");
                     return "payment-1";
@@ -212,7 +224,7 @@ class FulfillmentWorkflowTest {
             };
 
         ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
+            (orderId, reservationId, paymentId, operationKey) -> {
                 calls.add("ship");
                 throw new IllegalStateException(
                     "shipment unavailable"
@@ -263,7 +275,10 @@ class FulfillmentWorkflowTest {
         InventoryReservation inventory =
             new InventoryReservation() {
                 @Override
-                public String reserve(String orderId) {
+                public String reserve(
+                    String orderId,
+                    String operationKey
+                ) {
                     return "reservation-1";
                 }
 
@@ -280,7 +295,8 @@ class FulfillmentWorkflowTest {
                 @Override
                 public String charge(
                     String orderId,
-                    long amountCents
+                    long amountCents,
+                    String operationKey
                 ) {
                     return "payment-1";
                 }
@@ -299,7 +315,7 @@ class FulfillmentWorkflowTest {
             );
 
         ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
+            (orderId, reservationId, paymentId, operationKey) -> {
                 throw shipmentFailure;
             };
 
