@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.2.0-SNAPSHOT - Explicit Compensation**
+**0.3.0-SNAPSHOT - Durable Workflow Progress**
 
 This focused skeleton studies multi-step business operations, partial failure, compensation, and resumability.
 
@@ -10,7 +10,7 @@ This focused skeleton studies multi-step business operations, partial failure, c
 
 > When one business operation spans several independent steps, who owns sequencing, failure handling, and recovery?
 
-## Forward workflow
+## WFL-101 - Explicit orchestration
 
 ~~~text
 reserve inventory
@@ -20,49 +20,14 @@ charge payment
 create shipment
 ~~~
 
-## WFL-101 - One owner of forward progress
+FulfillmentWorkflow owns the order.
+
+Each capability owns only its local operation.
+
+## WFL-110 - Explicit compensation
 
 ~~~text
-FulfillmentWorkflow
-    |
-    +-- InventoryReservation
-    +-- PaymentCharging
-    +-- ShipmentCreation
-~~~
-
-The workflow decides what happens next.
-
-A step owns only how its own capability works.
-
-## WFL-110 - Completed side effects need compensation
-
-Forward and inverse operations:
-
-~~~text
-reserve <-> release
-charge  <-> refund
-~~~
-
-Failure after payment:
-
-~~~text
-reserve
-charge
-ship -> FAIL
-    ↓
-refund
-release
-~~~
-
-Compensation runs in reverse order of completed side effects.
-
-## Failure matrix
-
-~~~text
-reserve fails
--> no compensation
-
-charge fails
+payment fails
 -> release inventory
 
 shipment fails
@@ -70,57 +35,81 @@ shipment fails
 -> release inventory
 ~~~
 
-## Compensation failure
+Compensation is an inverse business action, not database rollback.
 
-The original forward failure remains the primary exception.
+## WFL-120 - Durable progress
 
-Compensation failures are preserved as suppressed exceptions.
-
-Example:
+Workflow progress now survives process restart:
 
 ~~~text
-shipment FAIL
-refund FAIL
-release FAIL
-
-primary:
-shipment failure
-
-suppressed:
-refund failure
-release failure
+STARTED
+    ↓
+INVENTORY_RESERVED
+    ↓
+PAYMENT_CHARGED
+    ↓
+COMPLETED
 ~~~
 
-Remaining compensations are still attempted after one compensation fails.
+The database also stores the IDs returned by completed steps.
 
-## Key lesson
+## Resume
+
+If a process crashes after the PAYMENT_CHARGED checkpoint:
 
 ~~~text
-exception propagation
+new process
+→ load PAYMENT_CHARGED
+→ create shipment only
+~~~
+
+Already checkpointed inventory/payment operations are skipped.
+
+A COMPLETED workflow returns its stored result without repeating side effects.
+
+## No long transaction
+
+There is deliberately no database transaction spanning remote calls.
+
+~~~text
+remote side effect
+→ DB checkpoint
+→ remote side effect
+→ DB checkpoint
+~~~
+
+A local transaction cannot provide atomicity across independent external systems.
+
+## Remaining crash window
+
+The critical unsolved case is:
+
+~~~text
+remote side effect SUCCESS
+process CRASH
+before checkpoint
+~~~
+
+The durable phase is now stale.
+
+A resume may repeat that remote call.
+
+Therefore:
+
+~~~text
+durable state
 !=
-distributed rollback
+safe replay
 ~~~
 
-and:
-
-~~~text
-compensation
-=
-explicit inverse business action
-~~~
-
-## Current limitation
-
-The workflow knows what completed only while the process is alive.
-
-A crash can erase that knowledge.
+This is the exact pressure for WFL-130.
 
 ## Evolution
 
 ~~~text
 WFL-101  explicit orchestrator owns step order
-WFL-110  partial failure + compensation             <- current
-WFL-120  persist workflow state / resume after crash
+WFL-110  partial failure + compensation
+WFL-120  persist workflow state / resume after crash   <- current
 WFL-130  idempotent retry boundary
 1.0      Freeze
 ~~~
@@ -133,4 +122,4 @@ WFL-130  idempotent retry boundary
 
 ## Next pressure
 
-WFL-120 will make completed-step state durable so a restarted process can decide whether to continue forward or compensate.
+WFL-130 will make external step calls idempotent using stable per-workflow operation keys so replay across the side-effect/checkpoint gap cannot duplicate the business action.
