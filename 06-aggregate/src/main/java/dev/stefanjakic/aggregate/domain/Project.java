@@ -2,6 +2,7 @@ package dev.stefanjakic.aggregate.domain;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public final class Project {
 
@@ -28,6 +29,36 @@ public final class Project {
 
         this.id = id;
         this.totalBudgetCents = totalBudgetCents;
+    }
+
+    public static Project restore(
+        String id,
+        long totalBudgetCents,
+        List<BudgetAllocation> allocations
+    ) {
+        Objects.requireNonNull(
+            allocations,
+            "allocations must not be null"
+        );
+
+        Project project = new Project(
+            id,
+            totalBudgetCents
+        );
+
+        for (BudgetAllocation allocation : allocations) {
+            Objects.requireNonNull(
+                allocation,
+                "allocation must not be null"
+            );
+
+            project.addAllocation(
+                allocation.id(),
+                allocation.amountCents()
+            );
+        }
+
+        return project;
     }
 
     public void addAllocation(
