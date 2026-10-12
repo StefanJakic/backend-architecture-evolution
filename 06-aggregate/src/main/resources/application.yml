@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: aggregate-evolution
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/aggregate}
+    username: ${DB_USERNAME:aggregate}
+    password: ${DB_PASSWORD:aggregate}
+  flyway:
+    enabled: true

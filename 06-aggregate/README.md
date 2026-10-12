@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.1.0-SNAPSHOT - Aggregate Root Owns Child Mutation**
+**0.2.0-SNAPSHOT - Aggregate Persistence Boundary**
 
 This focused skeleton studies consistency and ownership boundaries.
 
@@ -10,7 +10,7 @@ This focused skeleton studies consistency and ownership boundaries.
 
 > Which objects must change together to protect one business invariant, and where should the consistency boundary live?
 
-## Current domain
+## Domain
 
 ~~~text
 Project
@@ -26,54 +26,95 @@ sum(allocation.amount)
 project.totalBudget
 ~~~
 
-## Current design
+## AGG-101 - Root owns child mutation
 
 ~~~text
 outside world
     |
     v
-Project
+Project.addAllocation(...)
     |
-    +-- addAllocation(...)
-    +-- remainingBudgetCents()
-    +-- allocations() -> read-only snapshot
+    +-- validate duplicate ID
+    +-- check remaining budget
+    +-- mutate child collection
+~~~
+
+Children are immutable and the internal collection is not externally mutable.
+
+## AGG-110 - Persistence follows the aggregate
+
+Persistence now exposes one repository:
+
+~~~text
+ProjectRepository
     |
-    +-- BudgetAllocation
-    +-- BudgetAllocation
-    +-- BudgetAllocation
+    +-- insert(Project)
+    +-- findById(projectId)
+    +-- save(Project)
 ~~~
 
-`Project` is the aggregate root.
-
-## Why the root owns mutation
-
-A `BudgetAllocation` cannot decide whether its amount fits the total project budget.
-
-That decision requires state from the whole aggregate.
-
-Therefore callers ask the root to mutate:
+There is deliberately no:
 
 ~~~text
-project.addAllocation(...)
+BudgetAllocationRepository
 ~~~
 
-rather than editing children directly.
-
-## Key lesson
+The application transaction is:
 
 ~~~text
-object containment
-!=
-aggregate boundary
+load Project
+    ↓
+mutate through root
+    ↓
+save Project
+    ↓
+commit
 ~~~
 
-The boundary exists because several pieces of state must remain consistent together.
+## Relational tables are not aggregate boundaries
 
-## Planned evolution
+Storage uses:
 
 ~~~text
-AGG-101  root owns child mutation + invariant       <- current
-AGG-110  persist aggregate as one consistency boundary
+project
+budget_allocation
+~~~
+
+but application code still works through:
+
+~~~text
+Project aggregate
+~~~
+
+Multiple tables do not imply multiple independently mutable domain objects.
+
+## Rehydration
+
+The repository loads root and children in one JOIN snapshot and reconstructs through:
+
+~~~text
+Project.restore(...)
+~~~
+
+which reuses root validation.
+
+Persistence does not bypass the domain invariant.
+
+## Current lesson
+
+~~~text
+domain consistency boundary
+should drive
+persistence entry points
+~~~
+
+not the other way around.
+
+## Evolution
+
+~~~text
+AGG-101  root owns child mutation + invariant
+AGG-110  persist aggregate as one consistency boundary  <- current
 AGG-120  concurrent aggregate updates / optimistic version
 1.0      Freeze
 ~~~
@@ -86,4 +127,8 @@ AGG-120  concurrent aggregate updates / optimistic version
 
 ## Next pressure
 
-AGG-110 will add persistence without giving children independent repository ownership.
+AGG-120 will run two concurrent load-modify-save operations against the same Project.
+
+Both can start from the same valid aggregate snapshot and each make a locally valid change.
+
+Without root-level versioning, the later whole-aggregate save can overwrite the earlier one.
