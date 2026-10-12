@@ -1,5 +1,6 @@
 package dev.stefanjakic.aggregate.concurrency;
 
+import dev.stefanjakic.aggregate.application.OptimisticAggregateConflictException;
 import dev.stefanjakic.aggregate.application.ProjectBudgetService;
 import dev.stefanjakic.aggregate.application.ProjectRepository;
 import dev.stefanjakic.aggregate.domain.Project;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,11 +42,14 @@ class ConcurrentAggregateLostUpdateTest
     private PostgresProjectRepository postgresRepository;
 
     @Test
-    void wholeAggregateSaveCanLoseOneConcurrentMutation()
+    void optimisticVersionRejectsOneStaleAggregateSnapshot()
         throws Exception {
 
         String suffix = UUID.randomUUID().toString();
         String projectId = "project-" + suffix;
+        String initialId = "allocation-initial-" + suffix;
+        String firstId = "allocation-a-" + suffix;
+        String secondId = "allocation-b-" + suffix;
 
         Project project = new Project(
             projectId,
@@ -52,7 +57,7 @@ class ConcurrentAggregateLostUpdateTest
         );
 
         project.addAllocation(
-            "allocation-initial-" + suffix,
+            initialId,
             2_000
         );
 
@@ -62,17 +67,17 @@ class ConcurrentAggregateLostUpdateTest
 
         try {
             var firstAttempt = pool.submit(
-                () -> service.allocate(
+                () -> allocate(
                     projectId,
-                    "allocation-a-" + suffix,
+                    firstId,
                     3_000
                 )
             );
 
             var secondAttempt = pool.submit(
-                () -> service.allocate(
+                () -> allocate(
                     projectId,
-                    "allocation-b-" + suffix,
+                    secondId,
                     4_000
                 )
             );
@@ -81,13 +86,45 @@ class ConcurrentAggregateLostUpdateTest
                 coordinatedRepository.awaitBothLoads(
                     Duration.ofSeconds(5)
                 ),
-                "Both transactions should load the same aggregate before either save"
+                "Both transactions should load the same aggregate version before either save"
             );
 
             coordinatedRepository.releaseLoads();
 
-            firstAttempt.get(10, TimeUnit.SECONDS);
-            secondAttempt.get(10, TimeUnit.SECONDS);
+            AttemptResult first =
+                firstAttempt.get(10, TimeUnit.SECONDS);
+
+            AttemptResult second =
+                secondAttempt.get(10, TimeUnit.SECONDS);
+
+            List<AttemptResult> results =
+                List.of(first, second);
+
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(AttemptResult::success)
+                    .count()
+            );
+
+            assertEquals(
+                1,
+                results.stream()
+                    .filter(result -> !result.success())
+                    .count()
+            );
+
+            String winnerId = results.stream()
+                .filter(AttemptResult::success)
+                .map(AttemptResult::allocationId)
+                .findFirst()
+                .orElseThrow();
+
+            String loserId = results.stream()
+                .filter(result -> !result.success())
+                .map(AttemptResult::allocationId)
+                .findFirst()
+                .orElseThrow();
 
             Project finalProject = postgresRepository
                 .findById(projectId)
@@ -99,32 +136,40 @@ class ConcurrentAggregateLostUpdateTest
                 .collect(java.util.stream.Collectors.toSet());
 
             assertEquals(
-                2,
-                finalIds.size(),
-                "Both calls succeeded but one whole-aggregate snapshot overwrote the other"
+                Set.of(initialId, winnerId),
+                finalIds
             );
 
             assertTrue(
-                finalIds.contains(
-                    "allocation-initial-" + suffix
-                )
+                !finalIds.contains(loserId),
+                "The stale transaction must not persist any child snapshot"
             );
-
-            long concurrentAllocationsPresent =
-                Set.of(
-                    "allocation-a-" + suffix,
-                    "allocation-b-" + suffix
-                ).stream()
-                    .filter(finalIds::contains)
-                    .count();
 
             assertEquals(
                 1,
-                concurrentAllocationsPresent
+                finalProject.version()
             );
         } finally {
             coordinatedRepository.releaseLoads();
             pool.shutdownNow();
+        }
+    }
+
+    private AttemptResult allocate(
+        String projectId,
+        String allocationId,
+        long amountCents
+    ) {
+        try {
+            service.allocate(
+                projectId,
+                allocationId,
+                amountCents
+            );
+
+            return AttemptResult.success(allocationId);
+        } catch (OptimisticAggregateConflictException exception) {
+            return AttemptResult.conflict(allocationId);
         }
     }
 
@@ -202,6 +247,26 @@ class ConcurrentAggregateLostUpdateTest
 
         void releaseLoads() {
             releaseLoads.countDown();
+        }
+    }
+
+    private record AttemptResult(
+        String allocationId,
+        boolean success
+    ) {
+
+        static AttemptResult success(String allocationId) {
+            return new AttemptResult(
+                allocationId,
+                true
+            );
+        }
+
+        static AttemptResult conflict(String allocationId) {
+            return new AttemptResult(
+                allocationId,
+                false
+            );
         }
     }
 }
