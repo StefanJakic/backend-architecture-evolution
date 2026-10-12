@@ -8,12 +8,25 @@ public final class Project {
 
     private final String id;
     private final long totalBudgetCents;
+    private final long version;
     private final List<BudgetAllocation> allocations =
         new ArrayList<>();
 
     public Project(
         String id,
         long totalBudgetCents
+    ) {
+        this(
+            id,
+            totalBudgetCents,
+            0
+        );
+    }
+
+    private Project(
+        String id,
+        long totalBudgetCents,
+        long version
     ) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException(
@@ -27,13 +40,21 @@ public final class Project {
             );
         }
 
+        if (version < 0) {
+            throw new IllegalArgumentException(
+                "version must not be negative"
+            );
+        }
+
         this.id = id;
         this.totalBudgetCents = totalBudgetCents;
+        this.version = version;
     }
 
     public static Project restore(
         String id,
         long totalBudgetCents,
+        long version,
         List<BudgetAllocation> allocations
     ) {
         Objects.requireNonNull(
@@ -43,7 +64,8 @@ public final class Project {
 
         Project project = new Project(
             id,
-            totalBudgetCents
+            totalBudgetCents,
+            version
         );
 
         for (BudgetAllocation allocation : allocations) {
@@ -107,6 +129,10 @@ public final class Project {
 
     public long totalBudgetCents() {
         return totalBudgetCents;
+    }
+
+    public long version() {
+        return version;
     }
 
     private boolean containsAllocation(String allocationId) {

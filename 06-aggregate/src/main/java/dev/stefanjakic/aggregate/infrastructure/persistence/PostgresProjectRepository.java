@@ -1,5 +1,6 @@
 package dev.stefanjakic.aggregate.infrastructure.persistence;
 
+import dev.stefanjakic.aggregate.application.OptimisticAggregateConflictException;
 import dev.stefanjakic.aggregate.application.ProjectRepository;
 import dev.stefanjakic.aggregate.domain.BudgetAllocation;
 import dev.stefanjakic.aggregate.domain.Project;
@@ -30,12 +31,14 @@ public class PostgresProjectRepository
             """
             INSERT INTO project (
                 id,
-                total_budget_cents
+                total_budget_cents,
+                version
             )
-            VALUES (?, ?)
+            VALUES (?, ?, ?)
             """,
             project.id(),
-            project.totalBudgetCents()
+            project.totalBudgetCents(),
+            project.version()
         );
 
         insertAllocations(project);
@@ -48,6 +51,7 @@ public class PostgresProjectRepository
             SELECT
                 p.id,
                 p.total_budget_cents,
+                p.version,
                 a.allocation_id,
                 a.amount_cents
             FROM project p
@@ -60,6 +64,7 @@ public class PostgresProjectRepository
                 new ProjectSnapshotRow(
                     resultSet.getString("id"),
                     resultSet.getLong("total_budget_cents"),
+                    resultSet.getLong("version"),
                     resultSet.getString("allocation_id"),
                     resultSet.getObject("amount_cents", Long.class)
                 ),
@@ -89,6 +94,7 @@ public class PostgresProjectRepository
             Project.restore(
                 root.id(),
                 root.totalBudgetCents(),
+                root.version(),
                 allocations
             )
         );
@@ -100,16 +106,20 @@ public class PostgresProjectRepository
         int updated = jdbcTemplate.update(
             """
             UPDATE project
-            SET total_budget_cents = ?
+            SET total_budget_cents = ?,
+                version = version + 1
             WHERE id = ?
+              AND version = ?
             """,
             project.totalBudgetCents(),
-            project.id()
+            project.id(),
+            project.version()
         );
 
         if (updated != 1) {
-            throw new IllegalStateException(
-                "Project does not exist: " + project.id()
+            throw new OptimisticAggregateConflictException(
+                project.id(),
+                project.version()
             );
         }
 
@@ -145,6 +155,7 @@ public class PostgresProjectRepository
     private record ProjectSnapshotRow(
         String id,
         long totalBudgetCents,
+        long version,
         String allocationId,
         Long amountCents
     ) {
