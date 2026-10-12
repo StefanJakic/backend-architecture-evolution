@@ -2,7 +2,7 @@
 
 ## Status
 
-**0.2.0-SNAPSHOT - Aggregate Persistence Boundary**
+**0.3.0-SNAPSHOT - Root-Level Optimistic Versioning**
 
 This focused skeleton studies consistency and ownership boundaries.
 
@@ -15,6 +15,7 @@ This focused skeleton studies consistency and ownership boundaries.
 ~~~text
 Project
   totalBudget
+  version
   allocations[]
 ~~~
 
@@ -28,22 +29,16 @@ project.totalBudget
 
 ## AGG-101 - Root owns child mutation
 
+The root is the only entry point for allocation changes.
+
 ~~~text
 outside world
     |
     v
 Project.addAllocation(...)
-    |
-    +-- validate duplicate ID
-    +-- check remaining budget
-    +-- mutate child collection
 ~~~
 
-Children are immutable and the internal collection is not externally mutable.
-
 ## AGG-110 - Persistence follows the aggregate
-
-Persistence now exposes one repository:
 
 ~~~text
 ProjectRepository
@@ -53,69 +48,94 @@ ProjectRepository
     +-- save(Project)
 ~~~
 
-There is deliberately no:
+There is no independent BudgetAllocationRepository.
+
+Multiple relational tables still represent one domain consistency boundary.
+
+## AGG-120 - Concurrent snapshots need root-level versioning
+
+Before versioning:
 
 ~~~text
-BudgetAllocationRepository
+Tx A loads Project v0
+Tx B loads Project v0
+
+A adds Allocation-A
+B adds Allocation-B
+
+A saves
+B saves later
 ~~~
 
-The application transaction is:
+Both calls could succeed while one child change disappeared.
+
+That is a whole-aggregate lost update.
+
+## Optimistic root save
+
+Save now begins with:
+
+~~~sql
+UPDATE project
+SET version = version + 1
+WHERE id = ?
+  AND version = ?
+~~~
+
+With two transactions loaded from version 0:
 
 ~~~text
-load Project
-    ↓
-mutate through root
-    ↓
-save Project
-    ↓
-commit
+exactly 1 SUCCESS
+exactly 1 CONFLICT
 ~~~
 
-## Relational tables are not aggregate boundaries
-
-Storage uses:
+Final persisted state:
 
 ~~~text
-project
-budget_allocation
+initial allocation
++
+winner allocation
++
+version = 1
 ~~~
 
-but application code still works through:
+The stale transaction fails before replacing child rows.
+
+## Why version the root?
+
+The competing transactions may add different children.
+
+They still conflict because both computed new aggregate state from the same prior snapshot.
+
+Therefore:
 
 ~~~text
-Project aggregate
+aggregate conflict
+-> root version
 ~~~
 
-Multiple tables do not imply multiple independently mutable domain objects.
-
-## Rehydration
-
-The repository loads root and children in one JOIN snapshot and reconstructs through:
+not:
 
 ~~~text
-Project.restore(...)
+one version per child
 ~~~
-
-which reuses root validation.
-
-Persistence does not bypass the domain invariant.
 
 ## Current lesson
 
 ~~~text
-domain consistency boundary
-should drive
-persistence entry points
-~~~
+domain invariant
+-> protects mutation inside one loaded aggregate
 
-not the other way around.
+optimistic root version
+-> protects against stale concurrent aggregate saves
+~~~
 
 ## Evolution
 
 ~~~text
 AGG-101  root owns child mutation + invariant
-AGG-110  persist aggregate as one consistency boundary  <- current
-AGG-120  concurrent aggregate updates / optimistic version
+AGG-110  persist aggregate as one consistency boundary
+AGG-120  concurrent updates + optimistic version      <- current
 1.0      Freeze
 ~~~
 
@@ -125,10 +145,6 @@ AGG-120  concurrent aggregate updates / optimistic version
 ./gradlew test
 ~~~
 
-## Next pressure
+## Next
 
-AGG-120 will run two concurrent load-modify-save operations against the same Project.
-
-Both can start from the same valid aggregate snapshot and each make a locally valid change.
-
-Without root-level versioning, the later whole-aggregate save can overwrite the earlier one.
+After verification, 06-aggregate is ready for **1.0 COMPLETE / FROZEN**.
