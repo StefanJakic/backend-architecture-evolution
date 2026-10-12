@@ -5,7 +5,9 @@ import dev.stefanjakic.aggregate.domain.BudgetAllocation;
 import dev.stefanjakic.aggregate.domain.Project;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,6 +24,7 @@ public class PostgresProjectRepository
     }
 
     @Override
+    @Transactional
     public void insert(Project project) {
         jdbcTemplate.update(
             """
@@ -40,40 +43,47 @@ public class PostgresProjectRepository
 
     @Override
     public Optional<Project> findById(String projectId) {
-        var roots = jdbcTemplate.query(
+        List<ProjectSnapshotRow> rows = jdbcTemplate.query(
             """
-            SELECT id, total_budget_cents
-            FROM project
-            WHERE id = ?
+            SELECT
+                p.id,
+                p.total_budget_cents,
+                a.allocation_id,
+                a.amount_cents
+            FROM project p
+            LEFT JOIN budget_allocation a
+              ON a.project_id = p.id
+            WHERE p.id = ?
+            ORDER BY a.allocation_id
             """,
-            (resultSet, rowNumber) -> new ProjectRow(
-                resultSet.getString("id"),
-                resultSet.getLong("total_budget_cents")
-            ),
+            (resultSet, rowNumber) ->
+                new ProjectSnapshotRow(
+                    resultSet.getString("id"),
+                    resultSet.getLong("total_budget_cents"),
+                    resultSet.getString("allocation_id"),
+                    resultSet.getObject("amount_cents", Long.class)
+                ),
             projectId
         );
 
-        if (roots.isEmpty()) {
+        if (rows.isEmpty()) {
             return Optional.empty();
         }
 
-        ProjectRow root = roots.getFirst();
-
+        ProjectSnapshotRow root = rows.getFirst();
         List<BudgetAllocation> allocations =
-            jdbcTemplate.query(
-                """
-                SELECT allocation_id, amount_cents
-                FROM budget_allocation
-                WHERE project_id = ?
-                ORDER BY allocation_id
-                """,
-                (resultSet, rowNumber) ->
+            new ArrayList<>();
+
+        for (ProjectSnapshotRow row : rows) {
+            if (row.allocationId() != null) {
+                allocations.add(
                     new BudgetAllocation(
-                        resultSet.getString("allocation_id"),
-                        resultSet.getLong("amount_cents")
-                    ),
-                projectId
-            );
+                        row.allocationId(),
+                        row.amountCents()
+                    )
+                );
+            }
+        }
 
         return Optional.of(
             Project.restore(
@@ -85,6 +95,7 @@ public class PostgresProjectRepository
     }
 
     @Override
+    @Transactional
     public void save(Project project) {
         int updated = jdbcTemplate.update(
             """
@@ -131,9 +142,11 @@ public class PostgresProjectRepository
         }
     }
 
-    private record ProjectRow(
+    private record ProjectSnapshotRow(
         String id,
-        long totalBudgetCents
+        long totalBudgetCents,
+        String allocationId,
+        Long amountCents
     ) {
     }
 }
