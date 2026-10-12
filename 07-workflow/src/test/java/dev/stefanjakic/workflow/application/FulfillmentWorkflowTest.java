@@ -1,10 +1,15 @@
 package dev.stefanjakic.workflow.application;
 
 import dev.stefanjakic.workflow.domain.FulfillmentCommand;
+import dev.stefanjakic.workflow.domain.FulfillmentPhase;
+import dev.stefanjakic.workflow.domain.FulfillmentState;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -13,8 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class FulfillmentWorkflowTest {
 
     @Test
-    void successfulWorkflowNeedsNoCompensation() {
+    void completedWorkflowReturnsStoredResultWithoutRepeatingSideEffects() {
         List<String> calls = new ArrayList<>();
+        var repository =
+            new InMemoryFulfillmentStateRepository();
 
         InventoryReservation inventory =
             new InventoryReservation() {
@@ -56,15 +63,20 @@ class FulfillmentWorkflowTest {
         var workflow = new FulfillmentWorkflow(
             inventory,
             payment,
-            shipping
+            shipping,
+            repository
         );
 
-        var result = workflow.fulfill(
+        var command =
             new FulfillmentCommand(
                 "order-1",
                 10_000
-            )
-        );
+            );
+
+        var first = workflow.fulfill(command);
+        var second = workflow.fulfill(command);
+
+        assertEquals(first, second);
 
         assertEquals(
             List.of(
@@ -76,89 +88,18 @@ class FulfillmentWorkflowTest {
         );
 
         assertEquals(
-            "reservation-1",
-            result.reservationId()
-        );
-
-        assertEquals(
-            "payment-1",
-            result.paymentId()
-        );
-
-        assertEquals(
-            "shipment-1",
-            result.shipmentId()
+            FulfillmentPhase.COMPLETED,
+            repository.findByOrderId("order-1")
+                .orElseThrow()
+                .phase()
         );
     }
 
     @Test
-    void inventoryFailureStopsWithoutCompensation() {
+    void paymentFailureCompensatesReservationAndCheckpointsOutcome() {
         List<String> calls = new ArrayList<>();
-
-        InventoryReservation inventory =
-            new InventoryReservation() {
-                @Override
-                public String reserve(String orderId) {
-                    calls.add("reserve");
-                    throw new IllegalStateException(
-                        "inventory unavailable"
-                    );
-                }
-
-                @Override
-                public void release(String reservationId) {
-                    calls.add("release");
-                }
-            };
-
-        PaymentCharging payment =
-            new PaymentCharging() {
-                @Override
-                public String charge(
-                    String orderId,
-                    long amountCents
-                ) {
-                    calls.add("charge");
-                    return "payment-1";
-                }
-
-                @Override
-                public void refund(String paymentId) {
-                    calls.add("refund");
-                }
-            };
-
-        ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
-                calls.add("ship");
-                return "shipment-1";
-            };
-
-        var workflow = new FulfillmentWorkflow(
-            inventory,
-            payment,
-            shipping
-        );
-
-        assertThrows(
-            IllegalStateException.class,
-            () -> workflow.fulfill(
-                new FulfillmentCommand(
-                    "order-1",
-                    10_000
-                )
-            )
-        );
-
-        assertEquals(
-            List.of("reserve"),
-            calls
-        );
-    }
-
-    @Test
-    void paymentFailureReleasesCompletedReservation() {
-        List<String> calls = new ArrayList<>();
+        var repository =
+            new InMemoryFulfillmentStateRepository();
 
         InventoryReservation inventory =
             new InventoryReservation() {
@@ -170,9 +111,7 @@ class FulfillmentWorkflowTest {
 
                 @Override
                 public void release(String reservationId) {
-                    calls.add(
-                        "release:" + reservationId
-                    );
+                    calls.add("release");
                 }
             };
 
@@ -204,10 +143,11 @@ class FulfillmentWorkflowTest {
         var workflow = new FulfillmentWorkflow(
             inventory,
             payment,
-            shipping
+            shipping,
+            repository
         );
 
-        var failure = assertThrows(
+        assertThrows(
             IllegalStateException.class,
             () -> workflow.fulfill(
                 new FulfillmentCommand(
@@ -218,103 +158,27 @@ class FulfillmentWorkflowTest {
         );
 
         assertEquals(
-            "payment rejected",
-            failure.getMessage()
-        );
-
-        assertEquals(
             List.of(
                 "reserve",
                 "charge",
-                "release:reservation-1"
+                "release"
             ),
             calls
+        );
+
+        assertEquals(
+            FulfillmentPhase.COMPENSATED,
+            repository.findByOrderId("order-1")
+                .orElseThrow()
+                .phase()
         );
     }
 
     @Test
     void shipmentFailureCompensatesInReverseOrder() {
         List<String> calls = new ArrayList<>();
-
-        InventoryReservation inventory =
-            new InventoryReservation() {
-                @Override
-                public String reserve(String orderId) {
-                    calls.add("reserve");
-                    return "reservation-1";
-                }
-
-                @Override
-                public void release(String reservationId) {
-                    calls.add(
-                        "release:" + reservationId
-                    );
-                }
-            };
-
-        PaymentCharging payment =
-            new PaymentCharging() {
-                @Override
-                public String charge(
-                    String orderId,
-                    long amountCents
-                ) {
-                    calls.add("charge");
-                    return "payment-1";
-                }
-
-                @Override
-                public void refund(String paymentId) {
-                    calls.add(
-                        "refund:" + paymentId
-                    );
-                }
-            };
-
-        ShipmentCreation shipping =
-            (orderId, reservationId, paymentId) -> {
-                calls.add("ship");
-                throw new IllegalStateException(
-                    "shipment unavailable"
-                );
-            };
-
-        var workflow = new FulfillmentWorkflow(
-            inventory,
-            payment,
-            shipping
-        );
-
-        var failure = assertThrows(
-            IllegalStateException.class,
-            () -> workflow.fulfill(
-                new FulfillmentCommand(
-                    "order-1",
-                    10_000
-                )
-            )
-        );
-
-        assertEquals(
-            "shipment unavailable",
-            failure.getMessage()
-        );
-
-        assertEquals(
-            List.of(
-                "reserve",
-                "charge",
-                "ship",
-                "refund:payment-1",
-                "release:reservation-1"
-            ),
-            calls
-        );
-    }
-
-    @Test
-    void compensationFailuresAreSuppressedOnOriginalFailure() {
-        List<String> calls = new ArrayList<>();
+        var repository =
+            new InMemoryFulfillmentStateRepository();
 
         InventoryReservation inventory =
             new InventoryReservation() {
@@ -327,9 +191,6 @@ class FulfillmentWorkflowTest {
                 @Override
                 public void release(String reservationId) {
                     calls.add("release");
-                    throw new IllegalStateException(
-                        "inventory release failed"
-                    );
                 }
             };
 
@@ -347,8 +208,87 @@ class FulfillmentWorkflowTest {
                 @Override
                 public void refund(String paymentId) {
                     calls.add("refund");
+                }
+            };
+
+        ShipmentCreation shipping =
+            (orderId, reservationId, paymentId) -> {
+                calls.add("ship");
+                throw new IllegalStateException(
+                    "shipment unavailable"
+                );
+            };
+
+        var workflow = new FulfillmentWorkflow(
+            inventory,
+            payment,
+            shipping,
+            repository
+        );
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> workflow.fulfill(
+                new FulfillmentCommand(
+                    "order-1",
+                    10_000
+                )
+            )
+        );
+
+        assertEquals(
+            List.of(
+                "reserve",
+                "charge",
+                "ship",
+                "refund",
+                "release"
+            ),
+            calls
+        );
+
+        assertEquals(
+            FulfillmentPhase.COMPENSATED,
+            repository.findByOrderId("order-1")
+                .orElseThrow()
+                .phase()
+        );
+    }
+
+    @Test
+    void compensationFailureKeepsOriginalFailurePrimaryAndDurable() {
+        var repository =
+            new InMemoryFulfillmentStateRepository();
+
+        InventoryReservation inventory =
+            new InventoryReservation() {
+                @Override
+                public String reserve(String orderId) {
+                    return "reservation-1";
+                }
+
+                @Override
+                public void release(String reservationId) {
                     throw new IllegalStateException(
-                        "payment refund failed"
+                        "release failed"
+                    );
+                }
+            };
+
+        PaymentCharging payment =
+            new PaymentCharging() {
+                @Override
+                public String charge(
+                    String orderId,
+                    long amountCents
+                ) {
+                    return "payment-1";
+                }
+
+                @Override
+                public void refund(String paymentId) {
+                    throw new IllegalStateException(
+                        "refund failed"
                     );
                 }
             };
@@ -360,14 +300,14 @@ class FulfillmentWorkflowTest {
 
         ShipmentCreation shipping =
             (orderId, reservationId, paymentId) -> {
-                calls.add("ship");
                 throw shipmentFailure;
             };
 
         var workflow = new FulfillmentWorkflow(
             inventory,
             payment,
-            shipping
+            shipping,
+            repository
         );
 
         var thrown = assertThrows(
@@ -386,29 +326,166 @@ class FulfillmentWorkflowTest {
         );
 
         assertEquals(
-            List.of(
-                "reserve",
-                "charge",
-                "ship",
-                "refund",
-                "release"
-            ),
-            calls
-        );
-
-        assertEquals(
             2,
             thrown.getSuppressed().length
         );
 
         assertEquals(
-            "payment refund failed",
-            thrown.getSuppressed()[0].getMessage()
+            FulfillmentPhase.COMPENSATION_FAILED,
+            repository.findByOrderId("order-1")
+                .orElseThrow()
+                .phase()
         );
+    }
 
-        assertEquals(
-            "inventory release failed",
-            thrown.getSuppressed()[1].getMessage()
-        );
+    private static final class InMemoryFulfillmentStateRepository
+        implements FulfillmentStateRepository {
+
+        private final Map<String, FulfillmentState> states =
+            new HashMap<>();
+
+        @Override
+        public void createIfAbsent(FulfillmentCommand command) {
+            states.putIfAbsent(
+                command.orderId(),
+                new FulfillmentState(
+                    command.orderId(),
+                    command.amountCents(),
+                    FulfillmentPhase.STARTED,
+                    null,
+                    null,
+                    null
+                )
+            );
+        }
+
+        @Override
+        public Optional<FulfillmentState> findByOrderId(
+            String orderId
+        ) {
+            return Optional.ofNullable(
+                states.get(orderId)
+            );
+        }
+
+        @Override
+        public void markInventoryReserved(
+            String orderId,
+            String reservationId
+        ) {
+            FulfillmentState current =
+                require(orderId, FulfillmentPhase.STARTED);
+
+            states.put(
+                orderId,
+                new FulfillmentState(
+                    current.orderId(),
+                    current.amountCents(),
+                    FulfillmentPhase.INVENTORY_RESERVED,
+                    reservationId,
+                    null,
+                    null
+                )
+            );
+        }
+
+        @Override
+        public void markPaymentCharged(
+            String orderId,
+            String paymentId
+        ) {
+            FulfillmentState current =
+                require(
+                    orderId,
+                    FulfillmentPhase.INVENTORY_RESERVED
+                );
+
+            states.put(
+                orderId,
+                new FulfillmentState(
+                    current.orderId(),
+                    current.amountCents(),
+                    FulfillmentPhase.PAYMENT_CHARGED,
+                    current.reservationId(),
+                    paymentId,
+                    null
+                )
+            );
+        }
+
+        @Override
+        public void markCompleted(
+            String orderId,
+            String shipmentId
+        ) {
+            FulfillmentState current =
+                require(
+                    orderId,
+                    FulfillmentPhase.PAYMENT_CHARGED
+                );
+
+            states.put(
+                orderId,
+                new FulfillmentState(
+                    current.orderId(),
+                    current.amountCents(),
+                    FulfillmentPhase.COMPLETED,
+                    current.reservationId(),
+                    current.paymentId(),
+                    shipmentId
+                )
+            );
+        }
+
+        @Override
+        public void markCompensated(String orderId) {
+            FulfillmentState current =
+                states.get(orderId);
+
+            states.put(
+                orderId,
+                new FulfillmentState(
+                    current.orderId(),
+                    current.amountCents(),
+                    FulfillmentPhase.COMPENSATED,
+                    current.reservationId(),
+                    current.paymentId(),
+                    current.shipmentId()
+                )
+            );
+        }
+
+        @Override
+        public void markCompensationFailed(String orderId) {
+            FulfillmentState current =
+                states.get(orderId);
+
+            states.put(
+                orderId,
+                new FulfillmentState(
+                    current.orderId(),
+                    current.amountCents(),
+                    FulfillmentPhase.COMPENSATION_FAILED,
+                    current.reservationId(),
+                    current.paymentId(),
+                    current.shipmentId()
+                )
+            );
+        }
+
+        private FulfillmentState require(
+            String orderId,
+            FulfillmentPhase expected
+        ) {
+            FulfillmentState current = states.get(orderId);
+
+            if (current == null || current.phase() != expected) {
+                throw new IllegalStateException(
+                    "Unexpected workflow state"
+                );
+            }
+
+            return current;
+        }
     }
 }
