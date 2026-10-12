@@ -26,8 +26,8 @@ Requirement
 | 02 | Reservation / Time Window | **1.0 COMPLETE** | overlap, concurrent booking, holds, expiry |
 | 03 | Scarce Resource / Inventory | **1.0 COMPLETE** | quantity, contention, overselling |
 | 04 | Assignment / Matching | **1.0 COMPLETE** | selection and claiming |
-| 05 | Behavior / Policy | **NEXT** | behavior variation |
-| 06 | Aggregate / Ownership | Planned | consistency boundaries |
+| 05 | Behavior / Policy | **1.0 COMPLETE** | behavior variation |
+| 06 | Aggregate / Ownership | **NEXT** | consistency boundaries |
 | 07 | Workflow / Orchestration | Planned | multi-step distributed workflow |
 | 08 | External Boundary / Adapter | Planned | unreliable dependencies |
 | 09 | Event / Reaction | Planned | event-driven reaction |
