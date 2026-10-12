@@ -28,8 +28,8 @@ Requirement
 | 04 | Assignment / Matching | **1.0 COMPLETE** | selection and claiming |
 | 05 | Behavior / Policy | **1.0 COMPLETE** | behavior variation |
 | 06 | Aggregate / Ownership | **1.0 COMPLETE** | consistency boundaries |
-| 07 | Workflow / Orchestration | **NEXT** | multi-step distributed workflow |
-| 08 | External Boundary / Adapter | Planned | unreliable dependencies |
+| 07 | Workflow / Orchestration | **1.0 COMPLETE** | multi-step distributed workflow |
+| 08 | External Boundary / Adapter | **NEXT** | unreliable dependencies |
 | 09 | Event / Reaction | Planned | event-driven reaction |
 | 10 | Hierarchy / Tree | Planned | recursive structure |
 | 11 | Rule / Validation Pipeline | Planned | composable business rules |
